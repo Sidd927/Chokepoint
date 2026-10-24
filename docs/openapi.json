@@ -11,14 +11,29 @@
             "title": "Action Ids",
             "type": "array"
           },
+          "scenario": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scenario"
+          },
           "scenario_id": {
-            "title": "Scenario Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scenario Id"
           }
         },
-        "required": [
-          "scenario_id"
-        ],
         "title": "GraphRequest",
         "type": "object"
       },
@@ -45,9 +60,27 @@
             "title": "Max Nodes",
             "type": "integer"
           },
+          "scenario": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scenario"
+          },
           "scenario_id": {
-            "title": "Scenario Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scenario Id"
           },
           "strategy": {
             "default": "exact",
@@ -55,10 +88,76 @@
             "type": "string"
           }
         },
-        "required": [
-          "scenario_id"
-        ],
         "title": "PlanRequest",
+        "type": "object"
+      },
+      "ReportRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Ids"
+          },
+          "max_nodes": {
+            "default": 200000,
+            "maximum": 2000000.0,
+            "minimum": 1.0,
+            "title": "Max Nodes",
+            "type": "integer"
+          },
+          "scenario": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scenario"
+          },
+          "scenario_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scenario Id"
+          },
+          "strategy": {
+            "default": "exact",
+            "title": "Strategy",
+            "type": "string"
+          }
+        },
+        "title": "ReportRequest",
+        "type": "object"
+      },
+      "ValidateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "scenario": {
+            "title": "Scenario",
+            "type": "object"
+          }
+        },
+        "required": [
+          "scenario"
+        ],
+        "title": "ValidateRequest",
         "type": "object"
       },
       "ValidationError": {
@@ -126,14 +225,29 @@
             ],
             "title": "Claimed Total Cost Dh"
           },
+          "scenario": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scenario"
+          },
           "scenario_id": {
-            "title": "Scenario Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scenario Id"
           }
         },
-        "required": [
-          "scenario_id"
-        ],
         "title": "VerifyRequest",
         "type": "object"
       }
@@ -233,6 +347,43 @@
         "summary": "Plan"
       }
     },
+    "/api/v1/report": {
+      "post": {
+        "description": "PDF report. The server recomputes everything (solver or the given actions, graphs, verifier); the client supplies no results.",
+        "operationId": "report_api_v1_report_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Report"
+      }
+    },
     "/api/v1/scenarios": {
       "get": {
         "operationId": "scenarios_api_v1_scenarios_get",
@@ -247,6 +398,43 @@
           }
         },
         "summary": "Scenarios"
+      }
+    },
+    "/api/v1/scenarios/validate": {
+      "post": {
+        "description": "Validate a user-supplied scenario with the normal parser plus import limits. Nothing is stored.",
+        "operationId": "validate_scenario_api_v1_scenarios_validate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Validate Scenario"
       }
     },
     "/api/v1/scenarios/{scenario_id}": {

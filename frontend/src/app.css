@@ -161,3 +161,13 @@ pre { margin: 12px 0 0; max-height: 320px; overflow: auto; padding: 12px; backgr
 /* Long hashes must wrap inside the panel instead of widening it. */
 .panel-inner, .panel-body { min-width: 0; grid-template-columns: minmax(0, 1fr); }
 .callout > div, .callout-body, .digest code, .mono { min-width: 0; overflow-wrap: anywhere; }
+
+/* import page, action review, file input */
+.import { max-width: 980px; }
+.import textarea { width: 100%; min-height: 260px; padding: 12px; background: var(--bg-2); border: 1px solid var(--line-strong); border-radius: var(--radius); color: var(--text); font: 12px/18px var(--mono); resize: vertical; }
+.import-input { display: grid; gap: 12px; } .import-result { display: grid; gap: 14px; }
+.import-graph { position: relative; } .import-graph .cy-graph { height: 420px; }
+.file-btn { position: relative; cursor: pointer; } .file-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.file-btn:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+details.review { border: 0; padding: 0; background: none; } details.review > summary { color: var(--accent); font-size: 12px; } details.review .bullets { margin-top: 6px; }
+.import > header { display: grid; gap: 10px; }

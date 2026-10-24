@@ -1,5 +1,6 @@
 import {useEffect, useRef, useState} from 'react';
-import {errorMessage, getGraph, getScenario, planScenario, verifyPlan} from '../api/client';
+import {errorMessage, fetchReport, getGraph, getScenario, planScenario, saveBlob, verifyPlan} from '../api/client';
+import {IMPORTED_ID} from '../lib/imported';
 import type {Graph, Plan, Receipt, Scenario, Verification} from '../api/client';
 
 export type Tab = 'Inspect' | 'Plan' | 'Verify' | 'Compare' | 'Receipt';
@@ -17,11 +18,13 @@ export function useWorkspace(id: string) {
   const [selected, setSelected] = useState<string[]>([]);
   const [claim, setClaim] = useState('');
   const [strategy, setStrategy] = useState('exact');
-  const [maxNodes, setMaxNodes] = useState('200000');
+  const [maxNodes, setMaxNodes] = useState(id === IMPORTED_ID ? '1000' : '200000');
   const [tab, setTab] = useState<Tab>('Inspect');
   const [view, setView] = useState<'before' | 'after'>('before');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [planParams, setPlanParams] = useState<{strategy: string; max_nodes: number}>();
+  const [reporting, setReporting] = useState(false);
   const epoch = useRef(0);
 
   useEffect(() => {
@@ -56,7 +59,7 @@ export function useWorkspace(id: string) {
       if (token !== epoch.current) return;
       const graph = result.receipt && result.action_ids ? await getGraph(id, result.action_ids) : undefined;
       if (token !== epoch.current) return;
-      setPlan(result); setSelected(result.action_ids || []); setClaim('');
+      setPlan(result); setPlanParams({strategy, max_nodes: Number(maxNodes)}); setSelected(result.action_ids || []); setClaim('');
       setVerification(result.verification || undefined); setReceipt(result.receipt || undefined);
       setAfter(graph); setView(graph ? 'after' : 'before'); setTab(next);
     } catch (error) { if (token === epoch.current) setError(errorMessage(error)); }
@@ -98,7 +101,15 @@ export function useWorkspace(id: string) {
     finally { if (token === epoch.current) setBusy(false); }
   };
 
+  /** PDF of exactly what is on screen: after a solver plan the server re-runs the same deterministic solver; otherwise it reports the selected actions. */
+  const downloadReport = async () => {
+    setReporting(true); setError('');
+    try { saveBlob(await fetchReport(id, plan && planParams ? planParams : {action_ids: selected}), `chokepoint-report-${id}.pdf`); }
+    catch (error) { setError(errorMessage(error)); }
+    finally { setReporting(false); }
+  };
+
   return {scenario, before, after, graph: view === 'after' && after ? after : before, plan, verification, receipt, integrity,
     selected, claim, strategy, maxNodes, tab, view, busy, error, setTab, setView,
-    editSelected, editClaim, editStrategy, editBudget, compute, verify, reverify};
+    editSelected, editClaim, editStrategy, editBudget, compute, verify, reverify, downloadReport, reporting};
 }

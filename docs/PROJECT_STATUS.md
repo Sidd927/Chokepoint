@@ -17,7 +17,10 @@ Every number and graph is driven by API responses; nothing is hard-coded.
 - Stale-state protection: editing selection/strategy/budget clears verification; scenario switch remounts the workspace; request epochs drop late responses.
 - Cytoscape is code-split (main chunk 235 kB, graph chunk 435 kB).
 
-## Test results (executed 2026-10-24)
+## Added 2026-10-25
+Scenario import (`/import`, `POST /scenarios/validate`; request-scoped, nothing stored), deterministic evidence-backed action explanations (`chokepoint/explain.py`, `explanations` and `outcome` in `/plan`), PDF reports (`POST /report`, `chokepoint/report/pdf.py`, ReportLab), optional inline `scenario` on `/graph`, `/plan`, `/verify`. See README for limits and semantics. Not verified: remote CI on GitHub; non-Latin text in PDFs is replaced with `?`.
+
+## Test results (executed 2026-10-24, before the import/report work; see the README for current counts)
 | Command | Result |
 |---|---|
 | `make test` -> backend `pytest backend/tests` | **54 passed** (~90 s) |

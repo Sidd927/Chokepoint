@@ -34,7 +34,7 @@ function ScenarioSwitch({current}: {current: string}) {
   }, []);
   return <label className="switch"><span className="sr-only">Scenario</span>
     <select aria-label="Scenario" value={current} onChange={event => navigate(`/scenarios/${event.target.value}`)}>
-      {!items.some(item => item.id === current) && <option value={current}>{current}</option>}
+      {!items.some(item => item.id === current) && <option value={current}>{current === 'imported' ? 'Imported scenario (this session)' : current}</option>}
       {items.map(item => <option key={item.id} value={item.id}>{item.name.replace(' (synthetic)', '')}</option>)}
     </select></label>;
 }

@@ -1,12 +1,17 @@
 from __future__ import annotations
 import os, json, re
 from datetime import datetime, timezone
+from typing import Any
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 from chokepoint.scenario.loader import ScenarioStore
+from chokepoint.scenario.importer import parse_import, IMPORT_MAX_NODES
+from chokepoint.domain.errors import ScenarioError
+from chokepoint.explain import explain_actions, explain_outcome
+from chokepoint.report.pdf import build_report
 from chokepoint.graph.semantics import graph, reachable, witness, granting_rules, flow_permitted
 from chokepoint.solver.exact import solve_exact, greedy
 from chokepoint_verifier.checks import verify
@@ -20,28 +25,55 @@ app.add_middleware(CORSMiddleware, allow_origins=[x.strip() for x in os.getenv("
 
 class GraphRequest(BaseModel):
     model_config=ConfigDict(extra="forbid")
-    scenario_id: StrictStr
+    scenario_id: StrictStr|None=None
+    scenario: dict[str, Any]|None=None
     action_ids: list[StrictStr]=Field(default_factory=list)
 class PlanRequest(BaseModel):
     model_config=ConfigDict(extra="forbid")
-    scenario_id: StrictStr
+    scenario_id: StrictStr|None=None
+    scenario: dict[str, Any]|None=None
     strategy: StrictStr="exact"
     max_nodes: StrictInt=Field(default=int(os.getenv("CHOKEPOINT_DEFAULT_MAX_NODES","200000")),ge=1,le=int(os.getenv("CHOKEPOINT_MAX_NODES_CAP","2000000")))
 class VerifyRequest(BaseModel):
     model_config=ConfigDict(extra="forbid")
-    scenario_id: StrictStr
+    scenario_id: StrictStr|None=None
+    scenario: dict[str, Any]|None=None
     action_ids: list[StrictStr]=Field(default_factory=list)
     claimed_total_cost_dh: StrictInt|None=None
     claimed_solver_status: StrictStr|None=None
 
+class ValidateRequest(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    scenario: dict[str, Any]
+class ReportRequest(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    scenario_id: StrictStr|None=None
+    scenario: dict[str, Any]|None=None
+    action_ids: list[StrictStr]|None=None
+    strategy: StrictStr="exact"
+    max_nodes: StrictInt=Field(default=int(os.getenv("CHOKEPOINT_DEFAULT_MAX_NODES","200000")),ge=1,le=int(os.getenv("CHOKEPOINT_MAX_NODES_CAP","2000000")))
+
 def error(code,message,details=None,status=422): return JSONResponse(status_code=status,content={"error":{"code":code,"message":message,"details":details or []}})
 def get_scenario(sid): return store.get(sid)
+def resolve(req):
+    """Built-in scenario by id, or a request-scoped imported scenario (parsed on every request, never stored).
+    Returns (scenario, None) or (None, error_response)."""
+    if (req.scenario_id is None)==(req.scenario is None): return None, error("INVALID_REQUEST","provide exactly one of scenario_id or scenario")
+    if req.scenario is not None:
+        try: return parse_import(req.scenario), None
+        except ScenarioError as e: return None, error(e.code,str(e),[{"path":e.path or "/","message":str(e)}])
+    s=get_scenario(req.scenario_id)
+    if not s: return None, error("SCENARIO_NOT_FOUND","scenario not found",status=404)
+    return s, None
+def budget_error(req):
+    if req.scenario is not None and req.max_nodes>IMPORT_MAX_NODES: return error("INVALID_REQUEST",f"max_nodes is limited to {IMPORT_MAX_NODES} for imported scenarios")
 def now(): return datetime.now(timezone.utc).isoformat().replace("+00:00","Z")
 def serial_scenario(s):
     raw=normalize(s.raw); raw["fingerprint"]=scenario_fingerprint(s.raw); raw["warnings"]=list(s.warnings); return raw
 
 @app.exception_handler(Exception)
 async def handler(request, exc):
+    if isinstance(exc, RecursionError): return error("INVALID_REQUEST","document is too deeply nested")
     if isinstance(exc, ValueError): return error("INVALID_REQUEST",str(exc))
     return error("INTERNAL_ERROR","internal error",status=500)
 
@@ -87,8 +119,8 @@ def graph_response(s,ids):
 
 @app.post("/api/v1/graph")
 def graph_endpoint(req: GraphRequest):
-    s=get_scenario(req.scenario_id)
-    if not s: return error("SCENARIO_NOT_FOUND","scenario not found",status=404)
+    s,err=resolve(req)
+    if err: return err
     if len(req.action_ids)!=len(set(req.action_ids)) or any(x not in s.actions_by_id for x in req.action_ids): return error("INVALID_REQUEST","unknown or duplicate action ids")
     return graph_response(s,req.action_ids)
 
@@ -97,21 +129,56 @@ def verify_plan(s, result):
 
 @app.post("/api/v1/plan")
 def plan(req: PlanRequest):
-    s=get_scenario(req.scenario_id)
-    if not s: return error("SCENARIO_NOT_FOUND","scenario not found",status=404)
+    s,err=resolve(req)
+    if err: return err
     if req.strategy not in {"exact","greedy"}: return error("INVALID_REQUEST","strategy must be exact or greedy")
+    if budget_error(req): return budget_error(req)
     result=solve_exact(s,req.max_nodes) if req.strategy=="exact" else greedy(s,req.max_nodes)
-    verification=None; receipt=None; actions=[]
+    verification=None; receipt=None; actions=[]; explanations=[]
     if result.solver_status in {"OPTIMAL", "FEASIBLE_NOT_PROVEN"}:
         verification=verify_plan(s,result)
         if verification["verdict"]!="VERIFIED": return error("INTERNAL_VERIFICATION_FAILURE","verifier rejected solver plan",status=500)
         receipt=verification["receipt"]
         actions=[{"id":a.id,"kind":a.kind,"params":a.params,"cost_dh":a.cost_dh,"mandatory":a.mandatory,"description":a.description} for a in sorted((s.actions_by_id[x] for x in result.action_ids),key=lambda x:x.id)]
-    return {**result.__dict__,"scenario_id":s.id,"scenario_fingerprint":scenario_fingerprint(s.raw),"actions":actions,"verification":verification,"receipt":receipt,"generated_at":now()}
+        explanations=explain_actions(s,result.action_ids)
+    outcome=explain_outcome(result.solver_status,result.method,result.proof,verification,graph_response(s,[]),graph_response(s,result.action_ids) if verification else None,result.total_cost_dh,result.action_count)
+    return {**result.__dict__,"scenario_id":s.id,"scenario_fingerprint":scenario_fingerprint(s.raw),"actions":actions,"explanations":explanations,"outcome":outcome,"verification":verification,"receipt":receipt,"generated_at":now()}
 
 @app.post("/api/v1/verify")
 def verify_endpoint(req: VerifyRequest):
-    s=get_scenario(req.scenario_id)
-    if not s: return error("SCENARIO_NOT_FOUND","scenario not found",status=404)
+    s,err=resolve(req)
+    if err: return err
     result=verify(s.raw,req.action_ids,req.claimed_total_cost_dh,req.claimed_solver_status)
     return {"scenario_id":s.id,**result,"generated_at":now()}
+
+
+@app.post("/api/v1/scenarios/validate")
+def validate_scenario(req: ValidateRequest):
+    """Validate a user-supplied scenario with the normal parser plus import limits. Nothing is stored."""
+    try: s=parse_import(req.scenario)
+    except ScenarioError as e: return error(e.code,str(e),[{"path":e.path or "/","message":str(e)}])
+    return {"valid":True,"scenario":serial_scenario(s),"graph":graph_response(s,[]),"max_nodes_limit":IMPORT_MAX_NODES}
+
+@app.post("/api/v1/report")
+def report(req: ReportRequest):
+    """PDF report. The server recomputes everything (solver or the given actions, graphs, verifier); the client supplies no results."""
+    s,err=resolve(req)
+    if err: return err
+    if req.strategy not in {"exact","greedy"}: return error("INVALID_REQUEST","strategy must be exact or greedy")
+    if budget_error(req): return budget_error(req)
+    if req.action_ids is not None:
+        ids=req.action_ids
+        if len(ids)!=len(set(ids)) or any(x not in s.actions_by_id for x in ids): return error("INVALID_REQUEST","unknown or duplicate action ids")
+        ids=sorted(ids); cost=sum(s.actions_by_id[x].cost_dh for x in ids)
+        result={"solver_status":"USER_SELECTED","method":"user","action_ids":ids,"total_cost_dh":cost,"action_count":len(ids),"proof":{},"limitations":["Actions were selected by a person; the solver was not run."]}
+        verification=verify(s.raw,ids,None,None)
+    else:
+        r=solve_exact(s,req.max_nodes) if req.strategy=="exact" else greedy(s,req.max_nodes)
+        result={**r.__dict__}; ids=r.action_ids if r.solver_status in {"OPTIMAL","FEASIBLE_NOT_PROVEN"} else None
+        verification=verify_plan(s,r) if ids is not None else None
+    before=graph_response(s,[]); after=graph_response(s,ids) if ids is not None else None
+    explanations=explain_actions(s,ids) if ids else []
+    outcome=explain_outcome(result["solver_status"],result.get("method"),result.get("proof"),verification,before,after,result["total_cost_dh"],result["action_count"])
+    pdf=build_report(s,result,before,after,verification,explanations,outcome)
+    safe=re.sub(r"[^A-Za-z0-9_.-]","_",s.id)[:64]
+    return Response(pdf,media_type="application/pdf",headers={"Content-Disposition":f'attachment; filename="chokepoint-report-{safe}.pdf"',"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"})

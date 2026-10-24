@@ -56,6 +56,7 @@ test.describe('landing page', () => {
 
   test('anchor navigation works and moves the section into view', async ({page}) => {
     await page.goto('/');
+    await expect(page.getByTestId('story-readout')).toBeVisible();   // the story's height is only final once its data has loaded
     await page.locator('.l-nav').getByRole('link', {name: 'How it works'}).click();
     await expect(page).toHaveURL(/#how$/);
     await expect(page.getByRole('heading', {name: 'Five steps, two programs.'})).toBeInViewport();
@@ -109,8 +110,14 @@ test.describe('workspace', () => {
     await compute(page);
     await expect(page.getByTestId('plan-cost')).toHaveText('105 dh');
     await expect(page.getByTestId('action-row')).toHaveCount(5);
-    await page.getByTestId('action-row').first().locator('summary').click();
+    await page.getByTestId('action-row').first().locator('summary').first().click();
     await expect(page.getByTestId('action-row').first()).toContainText('modelled attack connections');
+    await page.getByTestId('action-row').filter({hasText: 'Harden jump host'}).locator('summary').first().click();
+    await expect(page.getByTestId('action-row').filter({hasText: 'Harden jump host'})).toContainText('Facts (computed from the model)');
+    await expect(page.getByTestId('action-row').filter({hasText: 'Harden jump host'}).getByTestId('necessity')).toContainText('Necessary within this plan');
+    await expect(page.getByTestId('action-row').filter({hasText: 'Harden jump host'})).toContainText('Confirm before real implementation');
+    await disclose(page, 'How to read this result');
+    await expect(page.getByTestId('outcome-notes')).toContainText('no cheaper plan exists');
     await expect(page.getByText('VERIFIED').first()).toBeVisible();
     await expect(page.getByRole('button', {name: 'After', exact: true})).toHaveAttribute('aria-pressed', 'true');
     await page.getByRole('button', {name: 'Before', exact: true}).click();
@@ -148,6 +155,11 @@ test.describe('workspace', () => {
     expect(saved).toEqual(shown);
     expect(saved.receipt_fingerprint).toBe(digest);
     expect(saved.action_ids).toEqual(['D01', 'D03', 'D08', 'D09', 'D10']);
+    const [pdf] = await Promise.all([page.waitForEvent('download'), page.getByTestId('report-download').click()]);
+    expect(pdf.suggestedFilename()).toBe('chokepoint-report-demo_city.pdf');
+    const pdfBytes = readFileSync((await pdf.path())!);
+    expect(pdfBytes.subarray(0, 5).toString()).toBe('%PDF-');
+    expect(pdfBytes.includes('105 dh') && pdfBytes.includes('(VERIFIED)') && pdfBytes.includes('Harden jump host')).toBe(true);
     await page.getByTestId('receipt-reverify').click();
     await expect(page.getByTestId('receipt-integrity')).toContainText('Receipt fingerprint matches');
     // long hashes must wrap inside the panel instead of widening it (regression: the panel used to clip its own content)
@@ -256,3 +268,50 @@ for (const [name, width, height] of [['desktop', 1440, 900], ['tablet', 768, 102
     expect(await noHorizontalOverflow(page)).toBe(true);
   });
 }
+
+test.describe('scenario import', () => {
+  test('invalid input is explained and keeps the text; a valid scenario previews and runs the whole workflow', async ({page}) => {
+    await page.goto('/import');
+    const input = page.getByLabel('Scenario JSON');
+    await input.fill('{"nope"');
+    await page.getByTestId('import-validate').click();
+    await expect(page.getByTestId('import-error')).toContainText('not valid JSON');
+    await input.fill('{"schema_version": "1", "id": "x"}');
+    await page.getByTestId('import-validate').click();
+    await expect(page.getByTestId('import-error')).toContainText('not valid');
+    await expect(input).toHaveValue('{"schema_version": "1", "id": "x"}');
+
+    await page.getByRole('button', {name: 'Start from the Canonical City format'}).click();
+    await expect(input).not.toHaveValue(/"nope"/);
+    await page.getByTestId('import-validate').click();
+    await expect(page.getByTestId('import-success')).toContainText('Valid scenario: Canonical City (synthetic)');
+    await expect(page.getByTestId('graph-canvas')).toBeVisible();
+    await page.getByTestId('import-open').click();
+
+    await expect(page).toHaveURL(/\/scenarios\/imported$/);
+    await expect(page.getByText('never stored by the server')).toBeVisible();
+    await compute(page);
+    await expect(page.getByTestId('plan-cost')).toHaveText('200 dh');
+    await step(page, 'Verify').click();
+    await page.getByTestId('verify-run').click();
+    await expect(page.getByTestId('verify-verdict')).toContainText('VERIFIED');
+    await step(page, 'Compare').click();
+    await expect(page.getByTestId('compare-after')).toContainText('0');
+    await step(page, 'Receipt').click();
+    const [pdf] = await Promise.all([page.waitForEvent('download'), page.getByTestId('report-download').click()]);
+    expect(pdf.suggestedFilename()).toBe('chokepoint-report-imported.pdf');
+    expect(readFileSync((await pdf.path())!).subarray(0, 5).toString()).toBe('%PDF-');
+    // built-in scenarios are unaffected
+    await page.goto('/');
+    await expect(page.getByTestId('scenario-card')).toHaveCount(2);
+  });
+
+  test('import page has no horizontal overflow on a phone', async ({page}) => {
+    await page.setViewportSize({width: 390, height: 844});
+    await page.goto('/import');
+    await page.getByRole('button', {name: 'Start from the Canonical City format'}).click();
+    await page.getByTestId('import-validate').click();
+    await expect(page.getByTestId('import-success')).toBeVisible();
+    expect(await noHorizontalOverflow(page)).toBe(true);
+  });
+});

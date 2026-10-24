@@ -7,6 +7,7 @@ import {Shell} from '../components/Shell';
 import type {NavItem} from '../components/Shell';
 import {Callout} from '../components/ui';
 import {assetName} from '../lib/explain';
+import {IMPORTED_ID} from '../lib/imported';
 import {useWorkspace} from '../state/useWorkspace';
 import type {Tab} from '../state/useWorkspace';
 import {ComparePanel, InspectPanel, PlanPanel, ReceiptPanel, VerifyPanel} from './Panels';
@@ -64,13 +65,13 @@ export function Workspace({id}: {id: string}) {
   const panel = tab === 'Inspect' ? <InspectPanel scenario={scenario} graph={before} highlight={setHighlighted} onPlan={() => state.compute()} busy={state.busy}/>
     : tab === 'Plan' ? <PlanPanel state={state} highlight={setHighlighted}/>
     : tab === 'Verify' ? <VerifyPanel state={state}/>
-    : tab === 'Compare' ? <ComparePanel scenario={scenario} before={before} after={state.after} plan={state.plan} onPlan={() => state.compute('Compare')} busy={state.busy}/>
-    : <ReceiptPanel receipt={state.receipt} onReverify={state.reverify} busy={state.busy} integrity={state.integrity} onPlan={() => state.compute('Receipt')}/>;
+    : tab === 'Compare' ? <ComparePanel scenario={scenario} before={before} after={state.after} plan={state.plan} onPlan={() => state.compute('Compare')} busy={state.busy} state={state}/>
+    : <ReceiptPanel receipt={state.receipt} onReverify={state.reverify} busy={state.busy} integrity={state.integrity} onPlan={() => state.compute('Receipt')} state={state}/>;
   const showSelection = (item: GraphSelection) => setSelection(item);
 
   return <Shell nav={nav} scenarioId={id}><main className="ws">
     <section className="stage" aria-label="Attack graph">
-      <header className="stage-head"><div><h1>{scenario.name}</h1><p>Synthetic model, not a live network. {state.view === 'after' && state.after ? 'Showing the network after the plan.' : 'Showing the network today.'}</p></div>
+      <header className="stage-head"><div><h1>{scenario.name}</h1><p>{id === IMPORTED_ID ? 'Imported scenario: held only in this browser session, never stored by the server. Modelled data supplied by you, not a live network. ' : 'Synthetic model, not a live network. '}{state.view === 'after' && state.after ? 'Showing the network after the plan.' : 'Showing the network today.'}</p></div>
         {state.after && <div className="segmented" role="group" aria-label="Graph state"><button type="button" aria-pressed={state.view === 'before'} className={state.view === 'before' ? 'active' : ''} onClick={() => state.setView('before')}>Before</button>
           <button type="button" aria-pressed={state.view === 'after'} className={state.view === 'after' ? 'active' : ''} onClick={() => state.setView('after')}>After</button></div>}</header>
       <div className="stage-tools" role="group" aria-label="Graph layers"><span className="tools-label">Show</span>{LAYERS.map(layer => <label key={layer.key} title={layer.help}><input data-testid={`layer-${layer.key}`} type="checkbox" checked={layers[layer.key]} onChange={event => setLayers({...layers, [layer.key]: event.target.checked})}/>{layer.label}</label>)}

@@ -1,6 +1,6 @@
 import {useState} from 'react';
 import type {ReactNode} from 'react';
-import type {Action, Graph, Scenario} from '../api/client';
+import type {Action, ActionExplanation, Graph, Scenario} from '../api/client';
 import {Callout} from '../components/ui';
 import type {useWorkspace} from '../state/useWorkspace';
 import {DH_HELP, KIND_LABEL, actionCost, assetName, checkLabel, connectionsAffected, describeEffect, solverMessage} from '../lib/explain';
@@ -15,13 +15,18 @@ export function Disclosure({title, meta, open, children}: {title: string; meta?:
   return <details className="disclosure" open={open}><summary><span>{title}</span>{meta && <small>{meta}</small>}</summary><div className="disclosure-body">{children}</div></details>;
 }
 
-function ActionRow({action, scenario, before, highlight}: {action: Action; scenario: Scenario; before: Graph; highlight: Highlight}) {
+function ActionRow({action, scenario, before, highlight, explanation}: {action: Action; scenario: Scenario; before: Graph; highlight: Highlight; explanation?: ActionExplanation}) {
   const used = connectionsAffected(action, before);
   const breakdown = action.effort_dh !== undefined ? `${action.effort_dh} effort + 2 × ${action.downtime_dh ?? 0} downtime` : undefined;
   return <details className="action" {...hoverProps(highlight, action)} data-testid="action-row">
     <summary><span className="mono id">{action.id}</span><span className="grow">{action.description}{action.mandatory && <small className="tag" title="The scenario requires this action in every plan"> · required</small>}</span><span className="cost"><Dh value={actionCost(action)}/></span></summary>
     <div className="action-body">
-      <p>{describeEffect(action, scenario)}</p>
+      {explanation ? <>
+        <p className={explanation.necessary_in_plan ? 'ok-text' : 'fine'} data-testid="necessity">{explanation.necessary_in_plan ? '✓ Necessary within this plan' : 'Not shown as individually necessary by the model'}</p>
+        <div><span className="eyebrow">Facts (computed from the model)</span><ul className="bullets">{explanation.facts.map(item => <li key={item}>{item}</li>)}</ul></div>
+        {explanation.inference.length > 0 && <div><span className="eyebrow">Inference (not established by the solver)</span><ul className="bullets">{explanation.inference.map(item => <li key={item}>{item}</li>)}</ul></div>}
+        <details className="review"><summary>Confirm before real implementation</summary><ul className="bullets">{explanation.review.map(item => <li key={item}>{item}</li>)}</ul><small>Human recommendations, not model output.</small></details>
+      </> : <p>{describeEffect(action, scenario)}</p>}
       <dl><div><dt>Type</dt><dd>{KIND_LABEL[action.kind]}</dd></div>
         <div><dt>Cost</dt><dd><Dh value={actionCost(action)}/>{breakdown && <small> ({breakdown})</small>}</dd></div>
         {action.params.asset_id && <div><dt>Asset</dt><dd>{assetName(scenario, action.params.asset_id)} <small className="mono">{action.params.asset_id}</small></dd></div>}
@@ -31,6 +36,7 @@ function ActionRow({action, scenario, before, highlight}: {action: Action; scena
     </div></details>;
 }
 
+const PdfButton = ({state, primary}: {state: Ws; primary?: boolean}) => <button type="button" data-testid="report-download" className={`btn ${primary ? 'btn-primary' : 'btn-secondary'}`} onClick={state.downloadReport} disabled={state.reporting || state.busy} aria-busy={state.reporting}>{state.reporting ? 'Building PDF…' : 'Download PDF report'}</button>;
 const Empty = ({title, children, action}: {title: string; children: ReactNode; action?: ReactNode}) =>
   <div className="empty-state"><h2 className="headline">{title}</h2><p className="lede">{children}</p>{action}</div>;
 
@@ -78,9 +84,10 @@ export function PlanPanel({state, highlight}: {state: Ws; highlight: Highlight})
       <div><dt>Required flows kept</dt><dd className={preserved === after.flows.length ? 'ok-text' : 'risk-text'}>{preserved} of {after.flows.length}</dd></div>
       <div><dt>Independent verifier</dt><dd className={plan.verification?.verdict === 'VERIFIED' ? 'ok-text' : 'risk-text'}>{plan.verification?.verdict ?? 'not run'}</dd></div></dl>}
     {hasPlan && <><h3 className="subhead">Recommended actions <small>{plan.proof?.nodes_evaluated ?? 0} states searched</small></h3>
-      <div className="actions">{plan.actions.map(action => <ActionRow key={action.id} action={action} scenario={scenario} before={before} highlight={highlight}/>)}</div>
+      <div className="actions">{plan.actions.map(action => <ActionRow key={action.id} action={action} scenario={scenario} before={before} highlight={highlight} explanation={plan.explanations?.find(item => item.id === action.id)}/>)}</div>
       <p className="fine"><button type="button" className="link" onClick={() => state.setTab('Verify')}>See the verifier’s checks</button> · <button type="button" className="link" onClick={() => state.setTab('Compare')}>Compare before and after</button></p></>}
     <div className="actions-row">{run}</div>{settings}
+    {plan.outcome && plan.outcome.length > 0 && <Disclosure title="How to read this result" meta="solver status, proof and verification"><ul className="bullets" data-testid="outcome-notes">{plan.outcome.map(item => <li key={item}>{item}</li>)}</ul></Disclosure>}
     {plan.limitations && plan.limitations.length > 0 && <Disclosure title="Limitations of this result"><ul className="bullets">{plan.limitations.map(item => <li key={item}>{item}</li>)}</ul></Disclosure>}
   </div>;
 }
@@ -114,7 +121,7 @@ export function VerifyPanel({state}: {state: Ws}) {
   </div>;
 }
 
-export function ComparePanel({scenario, before, after, plan, onPlan, busy}: {scenario: Scenario; before: Graph; after?: Graph; plan?: Ws['plan']; onPlan: () => void; busy: boolean}) {
+export function ComparePanel({scenario, before, after, plan, onPlan, busy, state}: {scenario: Scenario; before: Graph; after?: Graph; plan?: Ws['plan']; onPlan: () => void; busy: boolean; state: Ws}) {
   if (!after) return <div className="panel-body"><Empty title="Nothing to compare yet." action={<div className="actions-row"><button type="button" className="btn btn-primary" onClick={onPlan} disabled={busy}>{busy ? 'Working…' : 'Generate a plan'}</button></div>}>
       Once a plan exists, this view shows what changed: which critical targets are cut off, which attack connections disappear, and that every required flow still works. Today, {before.reachable_targets.length} of {scenario.targets.length} critical targets are reachable through {before.edges.length} modelled attack connections.</Empty></div>;
   const afterIds = new Set(after.edges.map(edge => edge.id));
@@ -139,11 +146,12 @@ export function ComparePanel({scenario, before, after, plan, onPlan, busy}: {sce
       <span className={before.reachable_targets.includes(id) ? 'risk-text' : 'ok-text'}>{before.reachable_targets.includes(id) ? '✕ reachable' : '✓ cut off'}</span> → <span className={after.reachable_targets.includes(id) ? 'risk-text' : 'ok-text'}>{after.reachable_targets.includes(id) ? '✕ reachable' : '✓ cut off'}</span></li>)}</ul></Disclosure>
     <Disclosure title="Required flows" meta={`${preserved} of ${after.flows.length} kept`}><ul className="rows">{after.flows.map(flow => <li key={flow.id}><span className="mono id">{flow.id}</span><span className="grow">{scenario.required_flows.find(item => item.id === flow.id)?.description}</span><span className={flow.permitted ? 'ok-text' : 'risk-text'}>{flow.permitted ? '✓ kept' : '✕ broken'}</span></li>)}</ul></Disclosure>
     <Disclosure title={`${removed.length} attack connections removed`} meta="dashed in the graph"><ul className="rows">{removed.map(edge => <li key={edge.id}><span className="grow">{assetName(scenario, edge.source)} → {assetName(scenario, edge.target)}</span></li>)}</ul></Disclosure>
+    <div className="actions-row"><PdfButton state={state}/></div>
     <p className="fine">A model comparison, not a deployment confirmation.</p>
   </div>;
 }
 
-export function ReceiptPanel({receipt, onReverify, busy, integrity, onPlan}: {receipt?: Ws['receipt']; onReverify: () => void; busy: boolean; integrity?: Ws['integrity']; onPlan: () => void}) {
+export function ReceiptPanel({receipt, onReverify, busy, integrity, onPlan, state}: {receipt?: Ws['receipt']; onReverify: () => void; busy: boolean; integrity?: Ws['integrity']; onPlan: () => void; state: Ws}) {
   const [note, setNote] = useState<{tone: 'ok' | 'risk'; text: string}>();
   if (!receipt) return <div className="panel-body"><Empty title="No receipt yet." action={<div className="actions-row"><button type="button" className="btn btn-primary" onClick={onPlan} disabled={busy}>{busy ? 'Working…' : 'Generate a plan'}</button></div>}>
     A receipt is a tamper-evident record created when a plan is verified: the scenario fingerprint, the chosen actions, the verifier’s checks and a SHA-256 digest of all of it. Generate and verify a plan to create one.</Empty></div>;
@@ -155,6 +163,7 @@ export function ReceiptPanel({receipt, onReverify, busy, integrity, onPlan}: {re
     <div className="digest"><span className="label">SHA-256 digest</span><code data-testid="receipt-digest">{receipt.receipt_fingerprint}</code></div>
     <div className="receipt-actions">
       <a className="btn btn-primary" data-testid="receipt-download" download={`chokepoint-${receipt.scenario_id}-${receipt.receipt_fingerprint.slice(7, 15)}.receipt.json`} href={`data:application/json;charset=utf-8,${encodeURIComponent(json)}`}>Download receipt (JSON)</a>
+      <PdfButton state={state}/>
       <button className="btn btn-secondary" data-testid="receipt-reverify" onClick={onReverify} disabled={busy}>Re-verify displayed receipt</button></div>
     {integrity && <Callout testId="receipt-integrity" tone={integrity.matches ? 'ok' : 'risk'} title={integrity.matches ? 'Receipt fingerprint matches' : 'Receipt fingerprint mismatch'} role="status">
       The verifier recomputed this receipt (verdict {integrity.verdict}). <span className="mono">Expected {integrity.expected}<br/>Returned {integrity.actual}</span></Callout>}

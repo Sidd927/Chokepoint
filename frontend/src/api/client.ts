@@ -1,3 +1,5 @@
+import {IMPORTED_ID, getImported, scenarioRef} from '../lib/imported';
+import type {ScenarioDocument} from '../lib/imported';
 export type ScenarioSummary = {
   id: string; name: string; description: string; synthetic: boolean;
   fingerprint: string; counts: Record<string, number>;
@@ -39,35 +41,57 @@ export type Receipt = {
 export type Verification = {
   verdict: string; checks: Check[]; violations: {code: string; detail: string}[]; receipt: Receipt;
 };
+export type ActionExplanation = {
+  id: string; kind: Action['kind']; description: string; cost_dh: number; effort_dh: number; downtime_dh: number; mandatory: boolean;
+  target: {asset_id: string | null; asset_name: string | null; finding_id: string | null; finding_title: string | null; rule_id: string | null; rule_label: string | null};
+  necessary_in_plan: boolean; targets_exposed_without: string[]; attack_connections_removed_alone: number;
+  facts: string[]; inference: string[]; review: string[];
+};
+export type ImportResult = {valid: true; scenario: Scenario & {warnings?: {code: string; message: string; path: string}[]}; graph: Graph; max_nodes_limit: number};
 export type Plan = {
   solver_status: string; action_ids: string[] | null; total_cost_dh: number | null;
   action_count: number; actions: Action[]; proof?: {exhaustive?: boolean; budget_exhausted?: boolean; nodes_evaluated?: number; max_nodes?: number};
   verification: Verification | null; receipt: Receipt | null; limitations?: string[]; method?: string;
+  explanations?: ActionExplanation[]; outcome?: string[];
 };
 export type VerifyRequest = {
   scenario_id: string; action_ids: string[]; claimed_total_cost_dh?: number;
   claimed_solver_status?: string | null;
 };
 
+export class ApiError extends Error { details: {path: string; message: string}[]; constructor(message: string, details: {path: string; message: string}[] = []) { super(message); this.details = details; } }
 const base = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '');
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(base + path, { ...init, headers: {'Content-Type': 'application/json', ...init?.headers} });
   let body;
   try { body = await response.json(); }
   catch { throw new Error(`API returned an unreadable response (${response.status}).`); }
-  if (!response.ok) throw new Error(body.error?.message || `Request failed (${response.status}).`);
+  if (!response.ok) throw new ApiError(body.error?.message || `Request failed (${response.status}).`, Array.isArray(body.error?.details) ? body.error.details : []);
   return body as T;
 }
 export const getHealth = () => api<{status: string}>('/health');
 export const listScenarios = () => api<{scenarios: ScenarioSummary[]}>('/scenarios');
-export const getScenario = (id: string) => api<Scenario>('/scenarios/' + encodeURIComponent(id));
-export const getGraph = (scenario_id: string, action_ids: string[]) => api<Graph>('/graph', {method: 'POST', body: JSON.stringify({scenario_id, action_ids})});
+export const getScenario = async (id: string): Promise<Scenario> => id === IMPORTED_ID
+  ? (await validateScenario(getImported() ?? (() => { throw new Error('No imported scenario in this session. Import one first.'); })())).scenario
+  : api<Scenario>('/scenarios/' + encodeURIComponent(id));
+export const validateScenario = (scenario: ScenarioDocument) => api<ImportResult>('/scenarios/validate', {method: 'POST', body: JSON.stringify({scenario})});
+export const getGraph = async (scenario_id: string, action_ids: string[]) => api<Graph>('/graph', {method: 'POST', body: JSON.stringify({...scenarioRef(scenario_id), action_ids})});
 export const planScenario = async (scenario_id: string, strategy: string, max_nodes: number) => {
   if (!Number.isSafeInteger(max_nodes) || max_nodes < 1 || max_nodes > 2000000) throw new Error('Search budget must be a whole number from 1 to 2000000.');
-  return api<Plan>('/plan', {method: 'POST', body: JSON.stringify({scenario_id, strategy, max_nodes})});
+  return api<Plan>('/plan', {method: 'POST', body: JSON.stringify({...scenarioRef(scenario_id), strategy, max_nodes})});
 };
 export const verifyPlan = async (payload: VerifyRequest) => {
   if (payload.claimed_total_cost_dh !== undefined && (!Number.isSafeInteger(payload.claimed_total_cost_dh) || payload.claimed_total_cost_dh < 0)) throw new Error('Claimed cost must be a non-negative whole number.');
-  return api<Verification>('/verify', {method: 'POST', body: JSON.stringify(payload)});
+  return api<Verification>('/verify', {method: 'POST', body: JSON.stringify({...scenarioRef(payload.scenario_id), action_ids: payload.action_ids, claimed_total_cost_dh: payload.claimed_total_cost_dh, claimed_solver_status: payload.claimed_solver_status})});
 };
 export const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'The request failed. Please try again.';
+
+/** PDF report: the server recomputes the plan/graphs/verification; we only say which scenario and which actions or solver settings. */
+export const fetchReport = async (scenario_id: string, options: {strategy: string; max_nodes: number} | {action_ids: string[]}): Promise<Blob> => {
+  const response = await fetch(base + '/report', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({...scenarioRef(scenario_id), ...options})});
+  if (!response.ok) { let message = `Report failed (${response.status}).`; try { message = (await response.json()).error?.message || message; } catch { /* keep default */ } throw new Error(message); }
+  return response.blob();
+};
+export const saveBlob = (blob: Blob, filename: string) => {
+  const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = filename; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+};

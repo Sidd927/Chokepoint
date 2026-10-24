@@ -36,6 +36,23 @@ The scenario owns all structure and action costs. The planner derives integer de
 - Landing page (`/`) with a scroll-driven story built from live API data (real required flows, attack routes, a flow-breaking quick fix, the optimal plan, the verifier result); no scroll hijacking, reduced-motion aware.
 - Graph-first workspace (`/scenarios/:id`): top bar with five-step navigator, one headline result per step, details behind disclosures, purposeful empty states. Design system in `DESIGN.md`.
 
+## Import your own scenario
+
+Open **Import a scenario** (landing page nav, or `/import`). Upload a `.json` file or paste JSON in the documented format (use **Start from the Canonical City format** to get a template; `backend/scenarios/*.json` are further examples and `backend/src/chokepoint/scenario/validate.py` is the schema). **Validate and preview** sends it to `POST /api/v1/scenarios/validate`, which runs the same parser as the built-in scenarios and returns either path-level errors (`/actions/2/params/rule_id: unknown reference`) or a normalized scenario with a graph preview, warnings and counts. **Open in workspace** then runs Inspect → Plan → Verify → Compare → Receipt on it.
+
+- **Format:** schema version `"1"`, exactly the fields the parser knows (unknown fields are rejected). Identifiers match `[A-Za-z][A-Za-z0-9_.-]{0,63}`.
+- **Limits for imports:** 256 KiB; 40 assets, 20 zones, 80 findings, 120 rules, 40 required flows, 40 actions, 10 origins, 10 targets, 8 services and 8 credentials per asset; search budget at most 1000 states (the default for imports). At these limits validation takes about 2 s and each search state about 50 ms.
+- **Lifecycle:** an imported scenario is held only in the browser tab (`sessionStorage`) and re-sent with each request. The server stores nothing, so nothing is shared with other users, written to disk or added to the built-in scenarios; closing the tab discards it. If validation fails, your text and any open workspace are unchanged.
+- **Not included:** a visual graph editor (edit the JSON and validate again).
+
+## Reports and receipts
+
+On **Compare** and **Receipt**, **Download PDF report** builds a PDF on the server from the same data as the screen (`POST /api/v1/report`; the server recomputes the solver result, graphs, verification and explanations, so the client supplies no results): summary metrics and verdict, before/after network drawings with legend, every selected action with its explanation, the verifier's checks, solver proof metadata and fingerprints. **Download receipt (JSON)** is unchanged. A rejected or unverified selection is labelled as such in the PDF. Scenario text is treated as untrusted (escaped, control characters removed, limited to Latin-1 for the built-in PDF fonts, so other scripts appear as `?`), and nothing is sent to any external service. Very large graphs are drawn small; the figures in the tables remain authoritative.
+
+## What the action explanations mean
+
+Each selected action shows three separate things. **Facts** are computed with the same graph engine the solver uses: what it changes, how many modelled attack connections it removes when applied alone, and whether, within this plan, removing only that action would leave a critical target reachable ("necessary within this plan"). A mandatory or redundant action is never described as necessary. **Inference** is reasoning the code does not establish (shown as such). **Confirm before real implementation** lists human review suggestions, not model output. Solver status text follows the proof metadata: `OPTIMAL` only when the search finished; `FEASIBLE_NOT_PROVEN`, budget exhaustion and greedy fallback say plainly that a cheaper plan may exist.
+
 ## Repository structure
 
 ```text
@@ -145,14 +162,16 @@ cd frontend && npm run e2e  # Playwright; starts both servers via config
 ## Tests
 
 ```bash
-make test        # backend pytest (54 tests) + frontend Vitest (17 tests)
+make test        # backend pytest (63 tests) + frontend Vitest (21 tests)
 make build       # TypeScript + production build
-make e2e         # Playwright, 17 tests: landing story/anchors/reduced motion/no scroll hijack, workspace journey, receipt download, errors, 3 viewport widths
+make e2e         # Playwright, 19 tests (adds import flow and PDF download): landing story/anchors/reduced motion/no scroll hijack, workspace journey, receipt download, errors, 3 viewport widths
 ```
 
 CI (`.github/workflows/ci.yml`) runs the same commands. It has not yet been observed running on GitHub.
 
 ## Security boundaries and limitations
+
+Boundaries that exist in code: strict request models (unknown fields rejected), a 256 KiB body cap, the scenario parser plus import limits, a capped search budget for imports, errors returned as `{error: {code, message, details}}` without stack traces or server paths, no server-side storage of imports, no external calls from report generation. Not provided: authentication, per-user isolation beyond "nothing is stored", rate limiting, request timeouts (a worst-case import can occupy a worker for about a minute), audit logging, or any claim of production or enterprise readiness. Treat imported data as sensitive: it travels to the server you run.
 
 This is an offline analysis tool over synthetic inputs. It uses allow-only, protocol-agnostic rules and does not model exploit prerequisites, privilege levels, probability, timing, live feeds, authentication, deployment, or real CVE intelligence. A SHA-256 fingerprint is an integrity digest, not a signature, authentication, tamper-proof storage, or proof. Real-world use requires authorised data, operational review, and separate deployment controls.
 

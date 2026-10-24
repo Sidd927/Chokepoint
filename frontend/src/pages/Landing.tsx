@@ -103,7 +103,7 @@ export function Landing() {
     <a className="skip" href="#story">Skip to the story</a>
     <div className="scroll-progress" aria-hidden="true"/>
     <header className="l-nav"><Link to="/" className="brand" aria-label="CHOKEPOINT"><Mark/><span>CHOKEPOINT</span></Link>
-      <nav aria-label="Page sections"><a href="#story">The idea</a><a href="#how">How it works</a><a href="#evidence">Evidence</a></nav>
+      <nav aria-label="Page sections"><a href="#story">The idea</a><a href="#how">How it works</a><a href="#evidence">Evidence</a><Link to="/import">Import a scenario</Link></nav>
       <div className="l-nav-right"><Health/>{launch ? <Link className="btn btn-primary" to={`/scenarios/${launch}`}>Open the workspace</Link> : <a className="btn btn-primary" href="#demo">Open the workspace</a>}</div></header>
 
     <section className="hero" aria-labelledby="hero-title">
@@ -157,7 +157,7 @@ export function Landing() {
     </section>
 
     <section id="demo" className="demo reveal" aria-labelledby="demo-title">
-      <div><h2 id="demo-title">Run it yourself.</h2><p>Pick a scenario. The workspace lets you inspect the network, generate a plan, verify it, compare before and after, and download the receipt.</p></div>
+      <div><h2 id="demo-title">Run it yourself.</h2><p>Pick a scenario. The workspace lets you inspect the network, generate a plan, verify it, compare before and after, and download the receipt and a PDF report.</p><p><Link to="/import">Import your own modelled scenario</Link> (JSON, validated server-side, never stored).</p></div>
       <ScenarioList items={items} error={listError} onRetry={loadList}/>
     </section>
 
