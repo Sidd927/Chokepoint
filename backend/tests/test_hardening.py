@@ -3,6 +3,7 @@ import hashlib
 import json
 import random
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -107,9 +108,9 @@ def test_fingerprint_changes_on_scenario_content_and_ignores_order():
 
 def test_cli_validate_and_plan_json():
     env={"PYTHONPATH":"backend/src"}
-    validated=subprocess.run([str(ROOT/".venv/bin/python"),"-m","chokepoint.cli","validate",str(ROOT/"scenarios/canonical_city.json")],cwd=ROOT.parent,env={**env,**dict(__import__('os').environ)},capture_output=True,text=True,check=True)
+    validated=subprocess.run([sys.executable,"-m","chokepoint.cli","validate",str(ROOT/"scenarios/canonical_city.json")],cwd=ROOT.parent,env={**env,**dict(__import__('os').environ)},capture_output=True,text=True,check=True)
     assert json.loads(validated.stdout)["valid"] is True
-    planned=subprocess.run([str(ROOT/".venv/bin/python"),"-m","chokepoint.cli","plan",str(ROOT/"scenarios/canonical_city.json"),"--json"],cwd=ROOT.parent,env={**env,**dict(__import__('os').environ)},capture_output=True,text=True,check=True)
+    planned=subprocess.run([sys.executable,"-m","chokepoint.cli","plan",str(ROOT/"scenarios/canonical_city.json"),"--json"],cwd=ROOT.parent,env={**env,**dict(__import__('os').environ)},capture_output=True,text=True,check=True)
     assert json.loads(planned.stdout)["solver_status"] == "OPTIMAL"
 
 def test_api_rejects_large_body_and_invalid_request_envelope():

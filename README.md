@@ -55,20 +55,29 @@ docs/                          architecture, algorithms, API, audit, testing
 
 ## Setup and run
 
+Requirements: **Python >= 3.11** (macOS system `python3` is 3.9 and will not work; use `brew install python@3.11`) and **Node.js >= 20** with npm. Tested with Python 3.11.15, Node 26.4.0, npm 11.17.0 on macOS arm64.
+
 ```bash
-make setup
-make test
-make build
+make setup        # creates backend/.venv with python3.13/3.12/3.11, installs backend + `npm ci`
+make test         # backend pytest + frontend vitest
+make build        # frontend production build
+make dev          # starts backend :8000 and frontend :5173 together (Ctrl-C stops both)
 ```
 
-Run the two processes in separate terminals:
+Override the interpreter with `make setup PYTHON=/path/to/python3.11`. If `backend/.venv` was created with an older Python, `make setup` is not enough on its own; recreate it with `python3.11 -m venv --clear backend/.venv`.
+
+Open `http://127.0.0.1:5173`. Backend health: `http://127.0.0.1:8000/api/v1/health`. The Vite dev server proxies `/api` to the backend (`VITE_PROXY_TARGET`, default `http://127.0.0.1:8000`).
+
+Running the processes manually, in two terminals:
 
 ```bash
 PYTHONPATH=backend/src backend/.venv/bin/python -m uvicorn chokepoint.api.app:app --host 127.0.0.1 --port 8000
 cd frontend && npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
-Open `http://127.0.0.1:5173`. Backend health is available at `http://127.0.0.1:8000/api/v1/health`.
+Port already in use? `lsof -nP -iTCP:8000 -iTCP:5173 -sTCP:LISTEN`, then `kill <PID>`.
+
+Browser end-to-end tests (`make e2e`) use ports 8010/5180 and need a one-time `cd frontend && npx playwright install chromium`.
 
 Optional configuration is documented in `.env.example`; do not put secrets in scenario files or committed environment files.
 
