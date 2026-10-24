@@ -9,6 +9,8 @@ Status: local implementation completed and checked in the working tree. No GitHu
 - npm 10.9.9
 - Existing remote: `https://github.com/Sidd927/Chokepoint.git`
 - Git identity: Siddhant Patil / siddhantpatil.hak@gmail.com
+- Local commit: `b7c8683` (`feat: build chokepoint planning application`)
+- Working tree: clean after the local commit; the supplied attachment inbox remains ignored.
 
 ## Checks run
 
@@ -19,6 +21,8 @@ Status: local implementation completed and checked in the working tree. No GitHu
 - Direct solver/verifier smoke: canonical optimum `['A01','A02','A03','A04']`, cost `200`, `OPTIMAL`, `VERIFIED`; demo optimum `['D01','D03','D08','D09','D10']`, cost `105`, `OPTIMAL`, `VERIFIED`.
 
 Playwright browsers were not installed or run in this worker. The UI was compiled successfully; the browser journey remains a follow-up check.
+
+The remote was inspected and confirmed as the intended Chokepoint repository. No push was attempted; pushing is an external action and awaits explicit user approval.
 
 ## Implemented
 
