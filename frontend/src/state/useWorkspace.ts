@@ -44,7 +44,7 @@ export function useWorkspace(id: string) {
   const editStrategy = (value: string) => { invalidate(); setStrategy(value); };
   const editBudget = (value: string) => { invalidate(); setMaxNodes(value); };
 
-  const compute = async () => {
+  const compute = async (next: Tab = 'Plan') => {
     invalidate(); setPlan(undefined); setReceipt(undefined); setAfter(undefined); setView('before');
     if (!/^\d+$/.test(maxNodes) || !Number.isSafeInteger(Number(maxNodes)) || Number(maxNodes) < 1 || Number(maxNodes) > 2000000) {
       setError('Search budget must be a whole number from 1 to 2000000.'); return;
@@ -58,7 +58,7 @@ export function useWorkspace(id: string) {
       if (token !== epoch.current) return;
       setPlan(result); setSelected(result.action_ids || []); setClaim('');
       setVerification(result.verification || undefined); setReceipt(result.receipt || undefined);
-      setAfter(graph); setView(graph ? 'after' : 'before'); setTab('Plan');
+      setAfter(graph); setView(graph ? 'after' : 'before'); setTab(next);
     } catch (error) { if (token === epoch.current) setError(errorMessage(error)); }
     finally { if (token === epoch.current) setBusy(false); }
   };

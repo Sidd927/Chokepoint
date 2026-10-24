@@ -1,0 +1,75 @@
+/* Landing page. Shares tokens with app.css; see DESIGN.md "Landing". */
+.landing { --pad: clamp(18px, 4.5vw, 64px); }
+.landing section { padding-left: var(--pad); padding-right: var(--pad); }
+.landing .cy-graph { height: 100%; min-height: 0; border-radius: 12px; }
+.landing .graph-shell { height: 100%; min-width: 0; } .landing-graph, .story-stage, .hero-visual { min-width: 0; overflow: hidden; } .hero-visual { overflow: visible; }
+.l-nav { position: sticky; top: 0; z-index: 40; display: flex; align-items: center; gap: 24px; height: 60px; padding: 0 var(--pad); background: rgba(11, 13, 18, .88); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+.l-nav nav { display: flex; gap: 22px; margin: 0 auto; } .l-nav nav a { color: var(--text-2); font-size: 13px; } .l-nav nav a:hover { color: var(--text); text-decoration: none; }
+.l-nav-right { display: flex; align-items: center; gap: 18px; }
+.scroll-progress { position: fixed; inset: 0 0 auto 0; height: 2px; z-index: 50; background: var(--accent); transform: scaleX(0); transform-origin: 0 50%; display: none; }
+@supports (animation-timeline: scroll()) { .scroll-progress { display: block; animation: progress linear both; animation-timeline: scroll(root); } @keyframes progress { to { transform: scaleX(1); } } }
+
+.hero { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: clamp(24px, 4vw, 64px); align-items: center; min-height: calc(100vh - 60px); padding-top: 32px; padding-bottom: 40px; }
+.kicker { font-size: 13px; color: var(--text-3); margin-bottom: 18px; }
+.hero h1 { font: 500 clamp(46px, 6.4vw, 92px)/.98 var(--display); letter-spacing: -.035em; } .hero h1 span { color: var(--ok); }
+.hero-lede { margin-top: 24px; font-size: 17px; line-height: 27px; color: var(--text-2); max-width: 46ch; }
+.hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 28px 0 18px; }
+.hero-visual { display: grid; gap: 10px; min-width: 0; }
+.hero-visual .landing-graph { height: clamp(340px, 58vh, 620px); }
+.hero-toggle { justify-self: start; }
+.hero-visual figcaption { font-size: 13px; color: var(--text-2); max-width: 70ch; } .hero-visual figcaption span { color: var(--text-3); }
+.hero-skeleton { min-height: 340px; }
+
+.story { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); grid-template-areas: "steps stage"; gap: clamp(24px, 4vw, 64px); padding-top: 24px; padding-bottom: 24px; border-top: 1px solid var(--line); }
+.story-stage { grid-area: stage; position: sticky; top: 76px; align-self: start; height: calc(100vh - 100px); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 10px; padding-top: 16px; }
+.stage-meta { display: flex; justify-content: space-between; font: 12px var(--mono); color: var(--text-3); }
+.stage-readout { min-height: 44px; font-size: 14px; color: var(--text-2); border-top: 1px solid var(--line); padding-top: 10px; }
+.stage-readout b { color: var(--text); font-weight: 600; } .stage-readout b.risk-text { color: var(--risk); } .stage-readout b.ok-text { color: var(--ok); } .digest-s { display: block; margin-top: 4px; color: var(--text-3); }
+.story-stage .landing-graph { animation: stagein .35s ease-out; } @keyframes stagein { from { opacity: .2; } to { opacity: 1; } }
+.story-steps { grid-area: steps; list-style: none; }
+.story-step { min-height: 78vh; display: flex; flex-direction: column; justify-content: center; gap: 14px; opacity: .42; transition: opacity .35s; }
+.story-step.active { opacity: 1; }
+.story-step h3 { font: 500 clamp(26px, 3vw, 38px)/1.12 var(--display); letter-spacing: -.02em; text-wrap: balance; }
+.story-step p { font-size: 16px; line-height: 26px; color: var(--text-2); max-width: 46ch; } .story-step p b { color: var(--text); font-weight: 600; }
+
+.how { padding-top: clamp(64px, 10vw, 128px); padding-bottom: clamp(48px, 8vw, 96px); border-top: 1px solid var(--line); display: grid; gap: 48px; }
+.how-head h2, .demo h2, .final h2 { font: 500 clamp(32px, 4.4vw, 56px)/1.05 var(--display); letter-spacing: -.025em; text-wrap: balance; }
+.how-head p, .demo > div > p { margin-top: 14px; color: var(--text-2); font-size: 16px; max-width: 52ch; }
+.pipeline { list-style: none; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0 28px; counter-reset: step; }
+.pipeline li { counter-increment: step; display: grid; gap: 8px; align-content: start; padding-top: 14px; border-top: 2px solid var(--line-strong); }
+.pipeline li::before { content: counter(step, decimal-leading-zero); font: 12px var(--mono); color: var(--text-3); }
+.pipeline b { font: 500 22px/1.2 var(--display); } .pipeline span { color: var(--text-2); font-size: 14px; }
+.pipeline li.side-a { border-top-color: var(--accent); } .pipeline li.side-b { border-top-color: var(--ok); }
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(24px, 4vw, 64px); }
+.split > div { display: grid; gap: 10px; align-content: start; } .split h3 { font: 500 24px/1.2 var(--display); } .split > div:first-child h3 { color: var(--accent); } .split > div:last-child h3 { color: var(--ok); }
+.split p { color: var(--text-2); font-size: 15px; max-width: 50ch; } .split code { background: var(--bg-2); padding: 1px 6px; border-radius: 4px; }
+
+.demo { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 7fr); gap: clamp(24px, 4vw, 64px); padding-top: clamp(48px, 8vw, 96px); padding-bottom: clamp(48px, 8vw, 96px); border-top: 1px solid var(--line); align-items: start; }
+.scenario-list { list-style: none; border-bottom: 1px solid var(--line); }
+.scenario-row { display: grid; grid-template-columns: 1fr auto; gap: 6px 20px; padding: 22px 8px; border-top: 1px solid var(--line); color: var(--text); transition: background .14s; } .scenario-row:hover { background: var(--bg-1); text-decoration: none; }
+.scenario-main { display: grid; gap: 4px; } .scenario-main strong { font: 500 24px/1.2 var(--display); } .scenario-main span { color: var(--text-2); }
+.scenario-facts { grid-column: 1; color: var(--text-3); font-size: 12px; } .scenario-go { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--accent); font-weight: 500; white-space: nowrap; }
+
+.evidence { padding-top: clamp(48px, 8vw, 96px); padding-bottom: clamp(48px, 8vw, 96px); border-top: 1px solid var(--line); display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 7fr); gap: clamp(24px, 4vw, 64px); }
+.evidence dl { display: grid; } .evidence dl > div { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 20px; padding: 18px 0; border-top: 1px solid var(--line); } .evidence dl > div:last-child { border-bottom: 1px solid var(--line); }
+.evidence dt { font: 500 19px/1.3 var(--display); color: var(--text); } .evidence dd { color: var(--text-2); }
+.final { padding-top: clamp(56px, 9vw, 120px); padding-bottom: clamp(56px, 9vw, 120px); display: grid; justify-items: start; gap: 24px; border-top: 1px solid var(--line); }
+.l-foot { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 22px var(--pad); border-top: 1px solid var(--line); color: var(--text-3); font-size: 12px; }
+
+.reveal { opacity: 0; transform: translateY(14px); transition: opacity .5s ease, transform .5s ease; } .reveal.in { opacity: 1; transform: none; }
+
+@media (max-width: 1023px) {
+  .split, .demo, .evidence { grid-template-columns: minmax(0, 1fr); }
+  .l-nav nav { display: none; } .l-nav-right { margin-left: auto; } .l-nav-right .health-wrap { display: none; }
+  .hero { grid-template-columns: minmax(0, 1fr); min-height: 0; padding-top: 40px; } .hero-visual .landing-graph { height: clamp(320px, 50vh, 460px); }
+  .story { grid-template-columns: minmax(0, 1fr); grid-template-areas: "stage" "steps"; gap: 0; }
+  .story-stage { top: 60px; height: 50vh; z-index: 5; background: var(--bg-0); padding: 10px 0 8px; border-bottom: 1px solid var(--line); grid-template-rows: auto minmax(0, 1fr) auto; }
+  .stage-readout { font-size: 12px; min-height: 36px; padding-top: 6px; }
+  .story-step { min-height: 60vh; } .pipeline { grid-template-columns: 1fr 1fr; gap: 28px 24px; } .split, .demo, .evidence { grid-template-columns: 1fr; } .evidence dl > div { grid-template-columns: 1fr; gap: 4px; }
+}
+@media (max-width: 559px) { .pipeline { grid-template-columns: 1fr; } .scenario-row { grid-template-columns: 1fr; } .scenario-go { grid-column: 1; grid-row: auto; } .hero-actions .btn { flex: 1; } .l-nav-right .btn { height: 36px; padding: 0 12px; } }
+@media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; transition: none; } .story-step { transition: none; } .story-stage .landing-graph { animation: none; } .scroll-progress { display: none; } }
+
+.evidence h2 { font: 500 clamp(28px, 3.2vw, 44px)/1.1 var(--display); letter-spacing: -.02em; text-wrap: balance; }
+.story-stage { height: auto; } .story-stage .landing-graph { height: clamp(360px, 62vh, 600px); } .hero-visual .landing-graph { height: clamp(340px, 52vh, 540px); }
+@media (max-width: 1023px) { .story-stage { height: 52vh; } .story-stage .landing-graph, .hero-visual .landing-graph { height: auto; } .story-stage .landing-graph { min-height: 0; height: 100%; } .hero-visual .landing-graph { height: clamp(340px, 56vh, 480px); } }

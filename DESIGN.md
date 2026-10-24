@@ -1,93 +1,72 @@
 # CHOKEPOINT Design System
 
-Status: implemented in `frontend/src/style.css` and `frontend/src/components/`. This file describes what the code does; if they disagree, fix one of them.
+Status: implemented in `frontend/src/app.css` (tokens, workspace), `frontend/src/landing.css` (landing) and `frontend/src/components/`. If this file and the code disagree, fix one of them.
 
-## 1. Research and decision
+## 1. Research (2026-10-24)
 
-Reviewed on 2026-10-24 at getdesign.md (catalogue lists 550+ site analyses; every entry below was opened):
+Inspected in a browser; nothing below is from memory.
 
-| Reference | What we took | What we rejected |
+| Reference | What was read | What we took | What we rejected |
+|---|---|---|---|
+| getdesign.md catalogue (550+ entries) | Entries for Vercel, Sentry, Linear, HashiCorp, IBM, NVIDIA. Full colour/type/principle text of Vercel, Sentry and Linear. | The idea of a system defined by tokens and reasons, not mockups. | HashiCorp, IBM, NVIDIA: only the one-line summary was read; used for the "enterprise-clean, structured" register, not copied. |
+| Vercel | Hairline 1px borders as structure; tight negative tracking on display type; mono only for technical tokens; one blue reserved for links and focus. | Hairlines instead of boxes; display tracking; restraint with colour. | Its light canvas and mesh gradients. |
+| Sentry | Dark data-dense dashboards; status via small marks, not big fills. | Density with clear hierarchy; verdicts carried by text + glyph. | Violet/pink/lime brand palette (several competing accents). |
+| Linear | Dark canvas, one lavender accent, **marketing built from real product UI, not decoration**; display type tightly tracked; mono only inside product. | Hero = the real product graph; a single accent; negative tracking. | Its custom type, pure-black canvas. |
+| Wiz (official site) | Narrative: "traditional tools work in silos -> one security graph provides context". Graph as the central idea. | Frame the problem first, then make the graph the hero. | Its form-heavy hero, Fortune-100 claims, AI-era positioning (we cannot support such claims). |
+| Sentry.io / Linear.app home pages | Visual storytelling through sticky product captures. | Sticky stage + scrolling steps. | Autoplay video, hijacked scroll. |
+| Microsoft "What is a security graph" | Nodes = entities with properties; edges = relationships/access paths; value = blast radius and attack paths. | Node detail panel, legend, "route" language. | AI/threat-intel claims. |
+
+Not done: commercial attack-graph products (XM Cyber, etc.) sit behind sign-in; no product UI of that kind was inspected. A limitation, not a claim.
+
+## 2. Direction: "evidence dossier"
+A calm dark console with an **editorial serif for statements and results** and a quiet sans for interface. The serif (system `New York`/`ui-serif`, Georgia fallback, no download) is the one distinctive choice: headlines read like findings. Colour is spent only on meaning. The graph is the hero on every screen.
+
+## 3. Tokens (`:root` in `app.css`)
+| Token | Value | Meaning |
 |---|---|---|
-| **Vercel** (black/white precision, Geist) | 1px hairline borders as the structural device, tight negative letter-spacing on headings, uppercase mono eyebrows at 12px, a single accent blue reserved for links/focus, restrained semantic colours (error red, warning amber). | Its light canvas and marketing mesh-gradients; wrong register for a security console. |
-| **Sentry** (dark, data-dense dashboards) | Dense-but-legible tables, dark layered surfaces with hairline borders, translucent focus ring, status communicated by small chips rather than big colour fills. | The violet/pink/lime brand palette (too playful, and several competing accents). |
-| **HashiCorp / IBM Carbon** (infrastructure, enterprise) | Structured left rail + content grid, flat rectangular panels with small radii, explicit blue interactive colour, plain-language status labels. | Carbon's light-first theme; HashiCorp's marketing-site layout. |
-| Microsoft Security 101 "What is a security graph" | Conceptual model for the graph: nodes are entities with properties, edges are relationships/access paths, and the value is *blast-radius and attack-path analysis*. Informs the node detail panel and the legend. | Its AI-driven / threat-intel claims: CHOKEPOINT models a synthetic network only. |
-| NVIDIA | Considered for its technical-power feel. | Green-on-black identity would collide with our "verified = green" semantic. |
-
-Decision: a **graphite/navy dark console**, Vercel's precision and typography discipline, Sentry's density, Carbon's structure, **one** electric-blue accent. Colour is spent on meaning only (risk, verified/preserved, caution); everything else is neutral.
-
-Not done: no screenshot-level study of commercial attack-graph products (Wiz, XM Cyber, etc.); they are not accessible without sign-in. Their public documentation conventions (entities as nodes, access as directed edges, a selected-item side panel) are covered by the Microsoft reference above.
-
-## 2. Product personality
-Calm, exact, evidence-first. The interface explains *why* before *how*. It never decorates a number it cannot source. Always labelled "Synthetic model — not a live network".
-
-## 3. Colour tokens (CSS variables in `:root`)
-| Token | Value | Use |
-|---|---|---|
-| `--bg-0` | `#0a0e15` | App canvas |
-| `--bg-1` | `#0f141d` | Rail, panels |
-| `--bg-2` | `#151b27` | Raised (cards, inputs) |
-| `--bg-3` | `#1c2433` | Hover / selected row |
-| `--line` | `#212a3a` | Hairline border (default) |
-| `--line-strong` | `#2f3b52` | Input/hover border |
-| `--text` | `#e8edf5` | Primary text (≥ 14:1 on bg-1) |
-| `--text-2` | `#a5b0c4` | Secondary text (≥ 7:1) |
-| `--text-3` | `#7f8ca6` | Metadata (≥ 4.8:1 on bg-1) |
-| `--accent` | `#4c9aff` | Interactive, focus, selection. The only brand colour. |
-| `--risk` | `#f06b6b` | Reachable targets, attack paths, rejected, failed checks |
-| `--ok` | `#3fcf8e` | Verified, preserved flows, blocked/unreachable after plan |
-| `--warn` | `#f5b14c` | Not proven optimal, caution, unverified |
-
-Each semantic colour has a `-soft` (14% alpha) fill for chips and callouts. Colour is never the only signal: every status also carries text and/or an icon glyph and line style.
+| `--bg-0 / 1 / 2 / 3` | `#0b0d12 / #11141b / #171b24 / #1e2330` | canvas / panel / raised / hover |
+| `--line`, `--line-strong` | `#232938`, `#333c50` | hairline, input border |
+| `--text`, `--text-2`, `--text-3` | `#eceae5`, `#a9b1c2`, `#8590a6` | warm off-white; contrast on bg-1 15.7 / 8.4 / 5.5 (>=4.5 on every surface) |
+| `--accent` | `#6aa6ff` | interactive, focus, "optimizer" colour on the landing |
+| `--risk` | `#f2706b` | reachable targets, attack steps, rejection, broken flows |
+| `--ok` | `#47d391` | cut off, preserved flows, verified, "verifier" colour on the landing |
+| `--warn` | `#f5b14c` | not proven optimal, required-action tag, synthetic notice |
+Status is never colour alone: always text and/or a glyph (check, cross, arrow) and line style.
 
 ## 4. Typography
-System UI stack (`Inter`, `-apple-system`, `Segoe UI`, `sans-serif`) and system mono (`ui-monospace`, `SF Mono`, `Menlo`). No webfont download, so the offline demo is identical to the online one.
-Scale (px / line-height): display 28/34 (-0.02em, 600), h2 18/26 (600), h3 14/20 (600), body 14/21, small 12/18, eyebrow 11/16 mono uppercase, +0.08em tracking. Max prose width 62ch. Digests, IDs, ports are mono.
+Display (serif): hero 46-92px / 0.98 / -0.035em; section 32-56px; headline in panels 26/32; large result numerals 52px. UI (sans) 14/21; small 12/18. Mono (system) only for IDs, digests, ports, solver status. Prose max 46-62ch. No decorative uppercase labels except graph zone captions and two tiny meta labels.
 
 ## 5. Layout
-- Grid: 232px left rail + fluid content. Content = graph stage (flex 1.5) + inspector (min 380px, max 460px).
-- Spacing scale: 4, 8, 12, 16, 24, 32.
-- Breakpoints: ≥1180 full layout; 760–1179 rail collapses to a top bar, inspector goes below graph; <760 single column, graph 360px tall, nav is a horizontally scrollable tab strip.
-- Radius: 6px controls, 8px panels. Elevation: none, except popovers (`0 8px 24px #0008`). Depth comes from surface steps, not shadows.
+- **Landing** (`/`): sticky nav (brand, 3 anchors, health, "Open the workspace"), hero 5/7 split, sticky-stage story 5/7, how-it-works, scenario list, evidence, final CTA, footer. Full-bleed sections divided by hairlines; no card grids.
+- **Workspace** (`/scenarios/:id`): 56px top bar (brand, scenario select, five-step navigator, health) + graph stage (fluid) + 410px result panel. Graph height `clamp(460px, 100vh-220px, 800px)`.
+- Breakpoints: >=1180 two columns; 760-1179 panel under the graph, steps scroll horizontally; <760 single column, 40px controls, graph 400px, detail card becomes inline.
+- Radius 6px (controls) / 8px (graph frame); no shadows except the floating graph detail card.
 
-## 6. Components
-- **Button**: primary = solid accent, dark text; secondary = bg-2 + line-strong; ghost = text only. 32px high (40px on touch widths). One primary per view.
-- **Input/select**: bg-2, 1px line-strong, focus = 2px accent ring (offset 1px). Labels always visible.
-- **Badge/chip**: 11px mono uppercase, soft fill + coloured text + 1px tint border.
-- **Tabs (nav)**: rail items with left 2px accent bar when active, `aria-current="page"`.
-- **Table**: hairline row dividers, sticky header, 36px rows, mono IDs.
-- **Tooltip / help**: native `title` plus visible helper text; no hover-only critical info.
-- **Callout**: 3px left border in semantic colour, soft fill, icon glyph.
+## 6. Information hierarchy (workspace)
+Each step opens with **one serif sentence stating the result**, then one primary action, then collapsed sections (`Disclosure`) with a one-line summary. Never more than one primary button in the panel.
+| Step | Headline | Disclosed on demand |
+|---|---|---|
+| Inspect | "3 of 3 critical targets can be reached" + one modelled route | required flows, action catalogue, findings, assets |
+| Plan | "Optimal plan: 105 dh across 5 actions" or "Feasible plan ..., not proven cheapest" | search settings, limitations, action detail rows |
+| Verify | "VERIFIED. Every check passed." / "REJECTED. N checks failed." with reasons first | all checks, action picker, claimed cost |
+| Compare | "All 3 critical targets are cut off" + before -> after numerals | targets, flows, removed connections |
+| Receipt | "Verified plan, sealed with a SHA-256 digest" + digest block | scenario digest, verifier, full JSON |
+Empty states say what the screen is for, show only real baseline facts (e.g. "Today, 3 of 3 targets are reachable"), and offer the one action that fills it.
 
 ## 7. Graph semantics
-| Encoding | Meaning |
-|---|---|
-| Columns | Network zones, ordered by attack distance from the origin (left = where an attacker starts). Zone box = labelled container. |
-| Node shape | Asset kind: external = hexagon, gateway = round-rectangle, workstation = rectangle, server = barrel, controller = diamond, plc = octagon (legend lists only kinds present). |
-| Node border | accent = attacker origin; red = reachable by attacker; thick red = reachable *critical target*; green = no longer reachable after plan. |
-| Red solid arrow | Modelled attack step (direction = attacker movement). Width/opacity low by default; hovering a node brightens its neighbourhood. |
-| Bright red thick | Witness path: one concrete shortest attack path to a target. |
-| Green dotted arrow | Required operational flow that is permitted. Red dotted if broken. |
-| Grey dashed | Firewall permission (rule), optional layer. |
-| Faint red dashed + "blocked" | Edge present *before* and absent *after* the plan (computed from the two real `/graph` responses). |
-Selecting a node/edge opens a detail panel (asset kind, zone, services and findings, credentials, reasons for an edge). An accessible table mirrors the graph.
+Zones are columns ordered by attack distance (attacker on the left); spacing grows with the canvas so small scenarios fill the stage; on very narrow canvases columns tighten. Shape = asset kind (legend lists present kinds). Ring: blue origin, red reachable, thick red reachable critical target, green critical target cut off. Red arrow = modelled attack step (bright = example route); green dotted = permitted required flow, red dashed = broken flow; grey dashed = firewall rule; faint dashed with a tee = blocked by the plan (computed from the two real `/graph` responses). Hover focuses a neighbourhood; "Focus on this asset" makes it persistent. A table mirrors the graph for assistive tech.
 
-## 8. States
-- Loading: skeleton blocks with `aria-busy`; buttons show spinner text and are disabled for the request's real duration.
-- Empty: a sentence saying what is missing and the single action that fixes it.
-- Error: red callout with the API's message and a Retry button where a retry is meaningful. Failures never render as success.
-- Success: green callout; verification gets a large status header.
-- Warning: amber for `FEASIBLE_NOT_PROVEN`, budget exhausted, stale data.
-- Stale: changing the selected actions/strategy/budget clears verification and receipt immediately.
+## 8. Landing narrative (all numbers come from the API)
+One scenario (prefers `canonical_city`) is loaded via `/scenarios/{id}`, `/graph`, `/plan` and `/graph` again; a "careless fix" is found by asking `/graph` about each non-mandatory `remove_rule` action until one breaks a required flow. Steps: (1) required flows, (2) attack routes, (3) the quick fix that breaks a flow, (4) the optimal plan with blocked edges, (5) the verifier's result and digest. The hero shows the same data with a Before / After toggle. If the API is unreachable the page says so; nothing is substituted. Landing graphs are read-only (`bare`): no wheel, drag or tap handling, so they never capture scroll or touch.
 
 ## 9. Motion
-120–160ms colour/opacity transitions only. No looping animation. `prefers-reduced-motion` removes transitions and smooth scroll.
+Reveal on enter (opacity + 14px, 0.5s) via IntersectionObserver; story step opacity and a 0.35s stage fade; a CSS scroll-timeline progress line where supported; smooth anchor scrolling. Never: scroll hijacking, snapping, autoplay, content hidden behind an animation (reveal items are visible with reduced motion or without IntersectionObserver). `prefers-reduced-motion` disables all transitions, animation and smooth scrolling.
 
-## 10. Accessibility
-WCAG 2.1 AA targets: text contrast ≥ 4.5:1, focus ring on every interactive element, keyboard-operable nav/plan/verify/receipt, `aria-live` for status and busy regions, landmarks (`nav`, `main`), skip link, graph has a table alternative, targets ≥ 32px (40px on narrow screens).
+## 10. Accessibility (tested vs. not)
+Tested: contrast ratios computed for all text/surface pairs; keyboard-reachable steps, disclosures, graph controls; `aria-current` on steps, `aria-pressed` on toggles, `role=status`/`alert` for health and errors, skip links, graph `role=img` with label plus an accessible table; no horizontal overflow at 1440/768/390 (e2e). Not tested: screen-reader walkthrough, automated axe audit, Safari/Firefox.
 
-## 11. Component reuse rules
-One stylesheet, tokens only (no raw hex in components except the graph style map, which reads the same tokens). Shared building blocks: `Stat`, `Callout`, `Chip`, `Eyebrow`. New screens compose these before adding CSS.
+## 11. Reuse rules
+Tokens only; shared pieces are `Disclosure`, `Callout`, `Legend`, `GraphCanvas` (full and `bare`), `Shell`. Cytoscape cannot read CSS variables, so `GraphCanvas.tsx` repeats the token hex values in one constant (`C`).
 
 ## 12. Copy rules
-Plain language first, technical code second (e.g. "Required flows still work" with `FLOWS_PRESERVED` as secondary text). Cost unit is always "dh" with the tooltip "decihours: effort + 2 × downtime, as defined by the scenario". Never "secure", "protected" or percentages. Use "modelled", "catalogue optimum", "independently re-checked".
+Plain language first, codes second. Cost unit is always `dh` (decihours: effort + 2 x downtime), never currency. Say "modelled", "synthetic", "proven" only when true. Never "secure", "protected", percentages, or AI claims.

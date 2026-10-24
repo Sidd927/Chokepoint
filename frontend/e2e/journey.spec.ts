@@ -14,147 +14,240 @@ const compute = async (page: Page) => {
   await expect(page.getByTestId('solver-status')).toHaveText('OPTIMAL');
 };
 const noHorizontalOverflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1);
+const disclose = (page: Page, title: string) => page.locator('summary', {hasText: title}).first().click();
+const jumpToStep = async (page: Page, index: number) => {
+  await page.locator('.story-step').nth(index).evaluate(element => element.scrollIntoView({block: 'center', behavior: 'instant' as ScrollBehavior}));
+};
 
-test('startup shows live backend status and both synthetic scenarios with real counts', async ({page}) => {
-  await page.goto('/');
-  await expect(page.getByRole('status')).toHaveText('Backend online');
-  await expect(page.getByTestId('scenario-card')).toHaveCount(2);
-  await expect(page.getByTestId('scenario-card').filter({hasText: 'Demo'})).toContainText('19');
-  await expect(page.getByTestId('scenario-card').filter({hasText: 'Canonical'})).toContainText('catalogue actions');
+test.describe('landing page', () => {
+  test('explains the product and shows a preview built from the live API', async ({page}) => {
+    await page.goto('/');
+    await expect(page.getByRole('heading', {level: 1})).toContainText('Cut the path.');
+    await expect(page.getByRole('heading', {level: 1})).toContainText('Keep the service.');
+    await expect(page.getByRole('status')).toHaveText('Backend online');
+    await expect(page.getByTestId('hero-caption')).toContainText('2 of 2');
+    await expect(page.getByTestId('hero-caption')).toContainText('Canonical City (synthetic)');
+    await page.getByRole('button', {name: 'After the plan'}).click();
+    await expect(page.getByTestId('hero-caption')).toContainText('0 of 2');
+    await expect(page.getByTestId('hero-caption')).toContainText('200');
+    await expect(page.getByText('Nothing here scans, or touches, a real network.')).toBeVisible();
+  });
+
+  test('the scroll story advances through real results as the visitor scrolls', async ({page}) => {
+    await page.goto('/');
+    await expect(page.getByTestId('story-readout')).toContainText('4 required flows');
+    const expected = [/4 required flows/, /2 of 2.*critical targets reachable/, /1 required flow broken/, /OPTIMAL.*200\s*dh.*targets 2 → 0.*4 of 4 kept/, /VERIFIED.*10 of 10 checks passed.*sha256:/s];
+    for (const [index, pattern] of expected.entries()) {
+      await jumpToStep(page, index);
+      await expect(page.getByTestId('story-readout')).toHaveText(pattern);
+      await expect(page.locator('.story-step.active')).toHaveAttribute('data-step', String(index));
+    }
+  });
+
+  test('primary call to action opens the working workspace and the plan can be generated', async ({page}) => {
+    await page.goto('/');
+    await page.getByRole('link', {name: 'Explore the live demo'}).first().click();
+    await expect(page).toHaveURL(/\/scenarios\/demo_city$/);
+    await expect(page.getByTestId('graph-canvas')).toBeVisible();
+    await page.getByRole('button', {name: 'Generate plan'}).click();
+    await expect(page.getByTestId('solver-status')).toHaveText('OPTIMAL');
+    await expect(page.getByTestId('plan-cost')).toHaveText('105 dh');
+  });
+
+  test('anchor navigation works and moves the section into view', async ({page}) => {
+    await page.goto('/');
+    await page.locator('.l-nav').getByRole('link', {name: 'How it works'}).click();
+    await expect(page).toHaveURL(/#how$/);
+    await expect(page.getByRole('heading', {name: 'Five steps, two programs.'})).toBeInViewport();
+    await page.locator('.l-nav').getByRole('link', {name: 'Evidence'}).click();
+    await expect(page.getByRole('heading', {name: /What the implementation actually guarantees/})).toBeInViewport();
+  });
+
+  test('scrolling is never hijacked: the wheel over the graph scrolls the page', async ({page}) => {
+    await page.goto('/');
+    const box = (await page.getByTestId('graph-canvas').first().boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, 500);
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(200);
+  });
+
+  test('reduced motion: content is visible without scroll effects and smooth scrolling is off', async ({page}) => {
+    await page.emulateMedia({reducedMotion: 'reduce'});
+    await page.goto('/');
+    expect(await page.evaluate(() => getComputedStyle(document.documentElement).scrollBehavior)).toBe('auto');
+    expect(await page.locator('.reveal').evaluateAll(items => items.every(item => getComputedStyle(item).opacity === '1'))).toBe(true);
+    await expect(page.locator('.story-step').first()).toHaveCSS('transition-duration', '0s');
+  });
+
+  test('backend unavailable: the page says so and shows no invented preview', async ({page}) => {
+    await page.route('**/api/v1/**', route => route.abort());
+    await page.goto('/');
+    await expect(page.getByTestId('story-error')).toContainText('needs the backend');
+    await expect(page.getByTestId('error-banner')).toBeVisible();
+    await expect(page.getByTestId('hero-caption')).toHaveCount(0);
+    await expect(page.getByRole('status')).toHaveText('Backend down');
+  });
 });
 
-test('demo_city: inspect, graph controls, plan, verify, compare, receipt and real download', async ({page}) => {
-  await open(page, 'Demo');
-  await expect(page.getByText('3 of 3 critical targets are reachable')).toBeVisible();
+test.describe('workspace', () => {
+  test('demo_city: inspect, graph controls, plan, verify, compare, receipt and real download', async ({page}) => {
+    await open(page, 'Demo');
+    await expect(page.getByText('3 of 3 critical targets')).toBeVisible();
+    await expect(page.getByText('can be reached')).toBeVisible();
 
-  // graph controls and layers
-  for (const name of ['Fit', 'Zoom in', 'Zoom out', 'Reset']) await page.getByRole('button', {name, exact: true}).click();
-  await page.getByTestId('layer-permissions').check(); await page.getByTestId('layer-permissions').uncheck();
-  await page.getByText('Accessible graph table').click();
-  await page.getByRole('button', {name: 'Municipal API', exact: true}).click();
-  await expect(page.getByTestId('selection-detail')).toContainText('Municipal API');
+    for (const name of ['Fit', 'Zoom in', 'Zoom out', 'Reset']) await page.getByRole('button', {name, exact: true}).click();
+    await page.getByTestId('layer-permissions').check(); await page.getByTestId('layer-permissions').uncheck();
+    await page.getByText('Accessible graph table').click();
+    await page.getByRole('button', {name: 'Municipal API', exact: true}).click();
+    await expect(page.getByTestId('selection-detail')).toContainText('Municipal API');
+    await page.getByRole('button', {name: 'Focus on this asset'}).click();
+    await expect(page.getByRole('button', {name: 'Show whole network'})).toBeVisible();
+    await page.getByRole('button', {name: 'Clear focus'}).click();
+    await page.getByRole('button', {name: 'Close details'}).click();
+    await expect(page.getByTestId('selection-detail')).toHaveCount(0);
 
-  // plan
-  await compute(page);
-  await expect(page.getByTestId('plan-cost')).toHaveText('105 dh');
-  await expect(page.getByTestId('action-row')).toHaveCount(5);
-  await page.getByTestId('action-row').first().locator('summary').click();
-  await expect(page.getByTestId('action-row').first()).toContainText('modelled attack connections');
-  await expect(page.getByText('Independent verifier: VERIFIED')).toBeVisible();
-  await expect(page.getByRole('button', {name: 'After'})).toHaveAttribute('aria-pressed', 'true');
-  await page.getByRole('button', {name: 'Before', exact: true}).click();
-  await expect(page.getByRole('heading', {name: 'Attack surface today'})).toBeVisible();
-  await page.getByRole('button', {name: 'After', exact: true}).click();
+    await compute(page);
+    await expect(page.getByTestId('plan-cost')).toHaveText('105 dh');
+    await expect(page.getByTestId('action-row')).toHaveCount(5);
+    await page.getByTestId('action-row').first().locator('summary').click();
+    await expect(page.getByTestId('action-row').first()).toContainText('modelled attack connections');
+    await expect(page.getByText('VERIFIED').first()).toBeVisible();
+    await expect(page.getByRole('button', {name: 'After', exact: true})).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('button', {name: 'Before', exact: true}).click();
+    await expect(page.getByText('Showing the network today.')).toBeVisible();
+    await page.getByRole('button', {name: 'After', exact: true}).click();
 
-  // verify: invalid input, wrong claim, correct claim
-  await step(page, 'Verify').click();
-  await page.getByLabel('Claimed total cost').fill('not-a-cost');
-  await page.getByTestId('verify-run').click();
-  await expect(page.getByRole('alert')).toContainText('Claimed cost');
-  await page.getByLabel('Claimed total cost').fill('999999');
-  await page.getByTestId('verify-run').click();
-  await expect(page.getByTestId('verify-verdict')).toContainText('REJECTED');
-  await expect(page.getByTestId('verify-verdict')).toContainText('Claimed cost is correct');
-  await page.getByLabel('Claimed total cost').fill('');
-  await page.getByTestId('verify-run').click();
-  await expect(page.getByTestId('verify-verdict')).toContainText('VERIFIED');
+    await step(page, 'Verify').click();
+    await disclose(page, 'Claim a cost to check');
+    await page.getByLabel('Claimed total cost').fill('not-a-cost');
+    await page.getByTestId('verify-run').click();
+    await expect(page.getByRole('alert')).toContainText('Claimed cost');
+    await page.getByLabel('Claimed total cost').fill('999999');
+    await page.getByTestId('verify-run').click();
+    await expect(page.getByTestId('verify-verdict')).toContainText('REJECTED');
+    await expect(page.getByTestId('verify-verdict')).toContainText('Claimed cost is correct');
+    await page.getByLabel('Claimed total cost').fill('');
+    await page.getByTestId('verify-run').click();
+    await expect(page.getByTestId('verify-verdict')).toContainText('Every check passed');
+    await disclose(page, 'All checks');
+    await expect(page.getByTestId('verify-verdict')).toContainText('10 of 10 passed');
 
-  // compare
-  await step(page, 'Compare').click();
-  await expect(page.getByTestId('compare-before')).toContainText('3');
-  await expect(page.getByTestId('compare-after')).toContainText('0');
-  await expect(page.getByText('5/5 still permitted')).toBeVisible();
+    await step(page, 'Compare').click();
+    await expect(page.getByTestId('compare-before')).toContainText('3');
+    await expect(page.getByTestId('compare-after')).toContainText('0');
+    await expect(page.getByText('5 of 5').first()).toBeVisible();
 
-  // receipt: digest, download equals displayed JSON, re-verify
-  await step(page, 'Receipt').click();
-  const digest = (await page.getByTestId('receipt-digest').textContent())!;
-  expect(digest).toMatch(/^sha256:[0-9a-f]{64}$/);
-  await page.getByText('Full receipt JSON').click();
-  const shown = JSON.parse((await page.getByTestId('receipt-json').textContent())!);
-  const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('receipt-download').click()]);
-  expect(download.suggestedFilename()).toMatch(/^chokepoint-demo_city-[0-9a-f]{8}\.receipt\.json$/);
-  const saved = JSON.parse(readFileSync((await download.path())!, 'utf8'));
-  expect(saved).toEqual(shown);
-  expect(saved.receipt_fingerprint).toBe(digest);
-  expect(saved.action_ids).toEqual(['D01', 'D03', 'D08', 'D09', 'D10']);
-  await page.getByTestId('receipt-reverify').click();
-  await expect(page.getByTestId('receipt-integrity')).toContainText('Receipt fingerprint matches');
+    await step(page, 'Receipt').click();
+    const digest = (await page.getByTestId('receipt-digest').textContent())!;
+    expect(digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    await disclose(page, 'Technical details');
+    const shown = JSON.parse((await page.getByTestId('receipt-json').textContent())!);
+    const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('receipt-download').click()]);
+    expect(download.suggestedFilename()).toMatch(/^chokepoint-demo_city-[0-9a-f]{8}\.receipt\.json$/);
+    const saved = JSON.parse(readFileSync((await download.path())!, 'utf8'));
+    expect(saved).toEqual(shown);
+    expect(saved.receipt_fingerprint).toBe(digest);
+    expect(saved.action_ids).toEqual(['D01', 'D03', 'D08', 'D09', 'D10']);
+    await page.getByTestId('receipt-reverify').click();
+    await expect(page.getByTestId('receipt-integrity')).toContainText('Receipt fingerprint matches');
+  });
+
+  test('Compare and Receipt explain themselves before a plan exists and lead to one', async ({page}) => {
+    await open(page, 'Demo');
+    await step(page, 'Compare').click();
+    await expect(page.getByRole('heading', {name: 'Nothing to compare yet.'})).toBeVisible();
+    await expect(page.getByText('Today, 3 of 3 critical targets are reachable')).toBeVisible();
+    await step(page, 'Receipt').click();
+    await expect(page.getByRole('heading', {name: 'No receipt yet.'})).toBeVisible();
+    await page.getByRole('button', {name: 'Generate a plan'}).click();
+    await expect(page.getByTestId('receipt-digest')).toBeVisible();
+    await expect(step(page, 'Receipt')).toHaveAttribute('aria-current', 'page');
+  });
+
+  test('scenario switching never shows another scenario\'s results; canonical_city plans to 200 dh', async ({page}) => {
+    await open(page, 'Demo');
+    await compute(page);
+    await expect(page.getByTestId('plan-cost')).toHaveText('105 dh');
+    await page.getByLabel('Scenario', {exact: true}).selectOption('canonical_city');
+    await expect(page.getByRole('heading', {name: 'Canonical City (synthetic)', level: 1})).toBeVisible();
+    await expect(page.getByTestId('solver-status')).toHaveCount(0);
+    await step(page, 'Receipt').click();
+    await expect(page.getByText('No receipt yet')).toBeVisible();
+    await compute(page);
+    await expect(page.getByTestId('plan-cost')).toHaveText('200 dh');
+    await expect(page.getByTestId('action-row')).toHaveCount(4);
+    await step(page, 'Receipt').click();
+    await expect(page.getByTestId('receipt-digest')).toBeVisible();
+    await expect(page.getByText('A01, A02, A03, A04')).toBeVisible();
+  });
+
+  test('an incomplete plan is rejected and a stale verification disappears when the selection changes', async ({page}) => {
+    await open(page, 'Canonical');
+    await compute(page);
+    await step(page, 'Verify').click();
+    await page.getByTestId('verify-run').click();
+    await expect(page.getByTestId('verify-verdict')).toContainText('VERIFIED');
+    await disclose(page, 'Choose the actions to verify');
+    await page.getByTestId('check-row').first().uncheck();
+    await expect(page.getByTestId('verify-verdict')).toHaveCount(0);
+    await page.getByTestId('verify-run').click();
+    await expect(page.getByTestId('verify-verdict')).toContainText('REJECTED');
+    await expect(page.getByTestId('verify-verdict')).toContainText('Mandatory actions included');
+  });
+
+  test('a search budget that cannot prove optimality is reported as unproven, not optimal', async ({page}) => {
+    await open(page, 'Demo');
+    await step(page, 'Plan').click();
+    await disclose(page, 'Search settings');
+    await page.getByLabel('Search budget').fill('1');
+    await page.getByTestId('compute-plan').click();
+    await expect(page.getByTestId('solver-status')).toHaveText('FEASIBLE_NOT_PROVEN');
+    await expect(page.getByTestId('plan-result')).toContainText('search budget was exhausted');
+    await expect(page.getByTestId('plan-result')).toContainText('not proven cheapest');
+    await expect(page.getByTestId('plan-result')).not.toContainText('Exact search finished');
+    await disclose(page, 'Search settings');
+    await page.getByLabel('Search budget').fill('0');
+    await page.getByTestId('compute-plan').click();
+    await expect(page.getByRole('alert')).toContainText('Search budget must be a whole number');
+  });
+
+  test('backend failures are visible and recoverable, never faked as success', async ({page}) => {
+    await page.route('**/api/v1/scenarios', route => route.abort());
+    await page.goto('/');
+    await expect(page.getByTestId('error-banner')).toBeVisible();
+    await expect(page.getByTestId('scenario-card')).toHaveCount(0);
+    await page.unroute('**/api/v1/scenarios');
+    await page.getByTestId('error-banner').getByRole('button', {name: 'Retry'}).click();
+    await expect(page.getByTestId('scenario-card')).toHaveCount(2);
+
+    await open(page, 'Canonical');
+    await page.route('**/api/v1/plan', route => route.fulfill({status: 500, contentType: 'application/json', body: JSON.stringify({error: {code: 'INTERNAL_ERROR', message: 'internal error', details: []}})}));
+    await step(page, 'Plan').click();
+    await page.getByTestId('compute-plan').click();
+    await expect(page.getByRole('alert')).toContainText('internal error');
+    await expect(page.getByTestId('solver-status')).toHaveCount(0);
+  });
+
+  test('unknown scenario URL shows a clear error with a way back', async ({page}) => {
+    await page.goto('/scenarios/does_not_exist');
+    await expect(page.getByTestId('error-banner')).toContainText('could not be loaded');
+  });
 });
 
-test('scenario switching never shows another scenario\'s results; canonical_city plans to 200 dh', async ({page}) => {
-  await open(page, 'Demo');
-  await compute(page);
-  await expect(page.getByTestId('plan-cost')).toHaveText('105 dh');
-  await page.getByLabel('Scenario', {exact: true}).selectOption('canonical_city');
-  await expect(page.getByRole('heading', {name: 'Canonical City (synthetic)', level: 1})).toBeVisible();
-  await expect(page.getByTestId('solver-status')).toHaveCount(0);
-  await step(page, 'Receipt').click();
-  await expect(page.getByText('No receipt yet')).toBeVisible();
-  await compute(page);
-  await expect(page.getByTestId('plan-cost')).toHaveText('200 dh');
-  await expect(page.getByTestId('action-row')).toHaveCount(4);
-  await step(page, 'Receipt').click();
-  await expect(page.getByTestId('receipt-digest')).toBeVisible();
-  await expect(page.getByText('A01, A02, A03, A04')).toBeVisible();
-});
-
-test('an incomplete plan is rejected and a stale verification disappears when the selection changes', async ({page}) => {
-  await open(page, 'Canonical');
-  await compute(page);
-  await step(page, 'Verify').click();
-  await page.getByTestId('verify-run').click();
-  await expect(page.getByTestId('verify-verdict')).toContainText('VERIFIED');
-  await page.getByTestId('check-row').first().uncheck();
-  await expect(page.getByTestId('verify-verdict')).toHaveCount(0);
-  await page.getByTestId('verify-run').click();
-  await expect(page.getByTestId('verify-verdict')).toContainText('REJECTED');
-  await expect(page.getByTestId('verify-verdict')).toContainText('Mandatory actions included');
-});
-
-test('a search budget that cannot prove optimality is reported as unproven, not optimal', async ({page}) => {
-  await open(page, 'Demo');
-  await step(page, 'Plan').click();
-  await page.getByLabel('Search budget').fill('1');
-  await page.getByTestId('compute-plan').click();
-  await expect(page.getByTestId('solver-status')).toHaveText('FEASIBLE_NOT_PROVEN');
-  await expect(page.getByTestId('plan-result')).toContainText('search budget was exhausted');
-  await expect(page.getByTestId('plan-result')).not.toContainText('Exact search finished');
-  await page.getByLabel('Search budget').fill('0');
-  await page.getByTestId('compute-plan').click();
-  await expect(page.getByRole('alert')).toContainText('Search budget must be a whole number');
-});
-
-test('backend failures are visible and recoverable, never faked as success', async ({page}) => {
-  await page.route('**/api/v1/scenarios', route => route.abort());
-  await page.goto('/');
-  await expect(page.getByTestId('error-banner')).toBeVisible();
-  await expect(page.getByTestId('scenario-card')).toHaveCount(0);
-  await page.unroute('**/api/v1/scenarios');
-  await page.getByTestId('error-banner').getByRole('button', {name: 'Retry'}).click();
-  await expect(page.getByTestId('scenario-card')).toHaveCount(2);
-
-  await open(page, 'Canonical');
-  await page.route('**/api/v1/plan', route => route.fulfill({status: 500, contentType: 'application/json', body: JSON.stringify({error: {code: 'INTERNAL_ERROR', message: 'internal error', details: []}})}));
-  await step(page, 'Plan').click();
-  await page.getByTestId('compute-plan').click();
-  await expect(page.getByRole('alert')).toContainText('internal error');
-  await expect(page.getByTestId('solver-status')).toHaveCount(0);
-});
-
-test('unknown scenario URL shows a clear error with a way back', async ({page}) => {
-  await page.goto('/scenarios/does_not_exist');
-  await expect(page.getByTestId('error-banner')).toContainText('could not be loaded');
-});
-
-for (const [name, width, height] of [['desktop', 1440, 900], ['tablet', 820, 1100], ['mobile', 390, 844]] as const) {
-  test(`layout works at ${name} width without horizontal overflow`, async ({page}) => {
+for (const [name, width, height] of [['desktop', 1440, 900], ['tablet', 768, 1024], ['mobile', 390, 844]] as const) {
+  test(`landing and workspace work at ${name} width without horizontal overflow`, async ({page}) => {
     await page.setViewportSize({width, height});
     await page.goto('/');
+    await expect(page.getByTestId('hero-caption')).toBeVisible();
+    await expect(page.getByRole('link', {name: 'Explore the live demo'}).first()).toBeVisible();
     expect(await noHorizontalOverflow(page)).toBe(true);
+    await jumpToStep(page, 3);
+    await expect(page.getByTestId('story-readout')).toContainText('OPTIMAL');
+    expect(await noHorizontalOverflow(page)).toBe(true);
+    await page.locator('#demo').scrollIntoViewIfNeeded();
     await page.getByTestId('scenario-card').filter({hasText: 'Demo'}).click();
     await expect(page.getByTestId('graph-canvas')).toBeVisible();
     await expect(step(page, 'Plan')).toBeVisible();
-    await expect(page.getByRole('button', {name: 'Generate plan'})).toBeVisible();
     expect(await noHorizontalOverflow(page)).toBe(true);
     await page.getByRole('button', {name: 'Generate plan'}).click();
     await expect(page.getByTestId('solver-status')).toHaveText('OPTIMAL');

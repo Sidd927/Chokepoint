@@ -79,7 +79,8 @@ describe('product workflow against the API contract', () => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('Failed to fetch'))));
     render(<MemoryRouter><App/></MemoryRouter>);
     await waitFor(() => expect(screen.getByTestId('error-banner').textContent).toContain('Failed to fetch'));
-    expect(screen.getAllByRole('button', {name: 'Retry'}).length).toBe(2);
+    expect(screen.getAllByRole('button', {name: 'Retry'}).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByTestId('story-error')).toBeTruthy();
     expect(screen.getAllByText('Backend down').length).toBeGreaterThan(0);
   });
 
@@ -89,7 +90,7 @@ describe('product workflow against the API contract', () => {
     await waitFor(() => expect(screen.getByTestId('solver-status').textContent).toBe('FEASIBLE_NOT_PROVEN'));
     expect(screen.getByTestId('plan-result').textContent).toContain('before proving');
     expect(screen.getByTestId('plan-result').textContent).not.toContain('Exact search finished');
-    expect(screen.getByTestId('plan-cost').textContent).toBe('20 dh');
+    expect(screen.getByTestId('plan-cost').textContent).toBe('20\u00a0dh');
   });
 
   it('receipt download is the exact JSON that is displayed, and the digest is the backend value', async () => {
@@ -120,5 +121,32 @@ describe('product workflow against the API contract', () => {
     fireEvent.click(screen.getByRole('button', {name: 'Plan'})); fireEvent.click(screen.getByTestId('compute-plan'));
     await waitFor(() => expect(screen.getAllByRole('alert')[0].textContent).toContain('internal error'));
     expect(screen.queryByTestId('solver-status')).toBeNull();
+  });
+});
+
+describe('landing page', () => {
+  it('builds its story from live API data and never from hard-coded results', async () => {
+    render(<MemoryRouter><App/></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId('hero-caption').textContent).toContain('1 of 1'));
+    expect(screen.getByTestId('hero-caption').textContent).toContain('Toy City (synthetic)');
+    expect(screen.getByRole('heading', {name: /Cut the path/})).toBeTruthy();
+    expect(screen.getAllByRole('heading', {level: 3}).map(h => h.textContent).some(text => text?.includes('cheapest plan'))).toBe(true);
+    fireEvent.click(screen.getByRole('button', {name: 'After the plan'}));
+    expect(screen.getByTestId('hero-caption').textContent).toContain('0 of 1');
+    expect(screen.getByTestId('hero-caption').textContent).toContain('20\u00a0dh');
+    expect(screen.getAllByRole('link', {name: /Explore the live demo|Open the workspace/}).every(link => link.getAttribute('href') === '/scenarios/toy')).toBe(true);
+  });
+
+  it('lists the scenarios as links into the real workspace', async () => {
+    render(<MemoryRouter><App/></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId('scenario-card').getAttribute('href')).toBe('/scenarios/toy'));
+  });
+
+  it('says so plainly when the backend is unavailable instead of faking a preview', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('Failed to fetch'))));
+    render(<MemoryRouter><App/></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId('story-error').textContent).toContain('needs the backend'));
+    expect(screen.queryByTestId('hero-caption')).toBeNull();
+    expect(screen.queryByTestId('story-readout')).toBeNull();
   });
 });

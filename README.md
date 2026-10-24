@@ -33,7 +33,8 @@ The scenario owns all structure and action costs. The planner derives integer de
 - FastAPI health, scenario, graph, plan, and verify endpoints.
 - CLI validation, planning, and verification.
 - Interactive Cytoscape graph: zones laid out as columns by attack distance, asset shape by kind, attack/example-path/flow/firewall layers, hover focus, node/edge detail panel, legend, "blocked by plan" edges in the after view, fit/zoom/reset, and an accessible table fallback. Cytoscape is code-split and loaded only when a scenario opens.
-- Responsive five-step workflow (Inspect, Plan, Verify, Compare, Receipt) with plain-language explanations; design system documented in `DESIGN.md`.
+- Landing page (`/`) with a scroll-driven story built from live API data (real required flows, attack routes, a flow-breaking quick fix, the optimal plan, the verifier result); no scroll hijacking, reduced-motion aware.
+- Graph-first workspace (`/scenarios/:id`): top bar with five-step navigator, one headline result per step, details behind disclosures, purposeful empty states. Design system in `DESIGN.md`.
 
 ## Repository structure
 
@@ -124,12 +125,12 @@ cd frontend && npm run e2e  # Playwright; starts both servers via config
 
 ## Demo script (about two minutes)
 
-1. `make dev`, open `http://127.0.0.1:5173`. The left rail shows **Backend online** from a live health check.
-2. Open **Demo City**. *Inspect* says how many critical targets an attacker can reach and shows one concrete path; the graph shows zones as columns from the attacker's side to the critical systems.
+1. `make dev`, open `http://127.0.0.1:5173`. Scroll the landing story (or click **Explore the live demo**); the page shows **Backend online** from a live health check and every number on it comes from the API.
+2. In **Demo City**, *Inspect* says how many critical targets an attacker can reach and shows one concrete path; the graph shows zones as columns from the attacker's side to the critical systems.
 3. Click **Generate plan**. The solver reports `OPTIMAL`, 5 actions, 105 dh; the graph switches to *After*, critical targets turn green, and removed attack steps appear as faint dashed "blocked" arrows. Expand an action to see what it changes.
 4. **Verify** runs the independent verifier: each check is listed in plain language. Tick or untick actions or enter a wrong claimed cost to see a `REJECTED` verdict with the failed checks.
 5. **Compare** shows targets reachable before/after, required flows kept (5/5) and attack connections removed.
-6. **Receipt** shows the SHA-256 digest, downloads the exact JSON, and can re-verify it. Switch scenario in the rail to try Canonical City (`A01-A04`, 200 dh).
+6. **Receipt** shows the SHA-256 digest, downloads the exact JSON, and can re-verify it. Switch scenario in the top bar to try Canonical City (`A01-A04`, 200 dh).
 
 ## Reading the results
 
@@ -144,9 +145,9 @@ cd frontend && npm run e2e  # Playwright; starts both servers via config
 ## Tests
 
 ```bash
-make test        # backend pytest (54 tests) + frontend Vitest (14 tests)
+make test        # backend pytest (54 tests) + frontend Vitest (17 tests)
 make build       # TypeScript + production build
-make e2e         # Playwright, 10 tests: startup, both scenarios, switching, errors, receipt download, 3 viewport widths
+make e2e         # Playwright, 17 tests: landing story/anchors/reduced motion/no scroll hijack, workspace journey, receipt download, errors, 3 viewport widths
 ```
 
 CI (`.github/workflows/ci.yml`) runs the same commands. It has not yet been observed running on GitHub.

@@ -4,9 +4,13 @@ import {Link, useNavigate} from 'react-router-dom';
 import {getHealth, listScenarios} from '../api/client';
 import type {ScenarioSummary} from '../api/client';
 
-export type NavItem = {id: string; label: string; hint: string; active: boolean; onSelect: () => void};
+export type NavItem = {id: string; label: string; hint: string; active: boolean; done?: boolean; onSelect: () => void};
 
-function Health() {
+export function Mark({size = 22}: {size?: number}) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h7v5.5L14 12l-4 1.5V19H3M21 5h-7v5.5L10 12l4 1.5V19h7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/></svg>;
+}
+
+export function Health() {
   const [health, setHealth] = useState<'checking' | 'online' | 'down'>('checking');
   const epoch = useRef(0);
   const check = () => {
@@ -28,24 +32,25 @@ function ScenarioSwitch({current}: {current: string}) {
     listScenarios().then(result => { if (active) setItems(result.scenarios); }).catch(() => { /* the page itself reports API failures */ });
     return () => { active = false; };
   }, []);
-  return <label className="switch"><span className="eyebrow">Scenario</span>
+  return <label className="switch"><span className="sr-only">Scenario</span>
     <select aria-label="Scenario" value={current} onChange={event => navigate(`/scenarios/${event.target.value}`)}>
       {!items.some(item => item.id === current) && <option value={current}>{current}</option>}
       {items.map(item => <option key={item.id} value={item.id}>{item.name.replace(' (synthetic)', '')}</option>)}
     </select></label>;
 }
 
-export function Shell({children, nav, scenarioId}: {children: ReactNode; nav?: NavItem[]; scenarioId?: string}) {
+/** Workspace chrome: one slim top bar so the graph gets the full width underneath. */
+export function Shell({children, nav, scenarioId, action}: {children: ReactNode; nav?: NavItem[]; scenarioId?: string; action?: ReactNode}) {
   return <div className="app">
     <a className="skip" href="#main">Skip to content</a>
-    <aside className="rail">
-      <Link to="/" className="brand" aria-label="CHOKEPOINT"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h7v5.5L14 12l-4 1.5V19H3M21 5h-7v5.5L10 12l4 1.5V19h7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/></svg><span>CHOKEPOINT</span></Link>
+    <header className="topbar">
+      <Link to="/" className="brand" aria-label="CHOKEPOINT"><Mark/><span>CHOKEPOINT</span></Link>
       {scenarioId && <ScenarioSwitch current={scenarioId}/>}
       {nav && <nav aria-label="Workflow" className="steps">{nav.map((item, index) =>
-        <button type="button" key={item.id} aria-label={item.label} aria-current={item.active ? 'page' : undefined} className={item.active ? 'step active' : 'step'} onClick={item.onSelect}>
-          <span className="step-index" aria-hidden="true">{index + 1}</span><span className="step-text"><b aria-hidden="true">{item.label}</b><small aria-hidden="true">{item.hint}</small></span></button>)}</nav>}
-      <div className="rail-foot"><span className="rail-note">Synthetic model. No live network is scanned or changed.</span><Health/></div>
-    </aside>
+        <button type="button" key={item.id} aria-label={item.label} aria-current={item.active ? 'page' : undefined} className={`step${item.active ? ' active' : ''}${item.done ? ' done' : ''}`} onClick={item.onSelect} title={item.hint}>
+          <span className="step-index" aria-hidden="true">{item.done ? '✓' : index + 1}</span><span aria-hidden="true">{item.label}</span></button>)}</nav>}
+      <div className="top-right"><Health/>{action}</div>
+    </header>
     <div className="content" id="main">{children}</div>
   </div>;
 }
