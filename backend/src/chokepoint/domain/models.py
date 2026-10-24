@@ -82,6 +82,7 @@ class Scenario:
     actions: tuple[Action, ...]
     max_cost_dh: int | None
     raw: dict[str, Any] = field(repr=False, compare=False)
+    warnings: tuple[dict[str, str], ...] = field(default_factory=tuple, compare=False)
 
     @property
     def assets_by_id(self): return {x.id: x for x in self.assets}

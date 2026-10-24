@@ -39,7 +39,12 @@ def greedy(scn, max_nodes=0, method="greedy"):
             if gain>0:
                 a=scn.actions_by_id[aid]; choices.append((gain,a.cost_dh+1,a.cost_dh,aid))
         if not choices: return SolveResult("NO_PLAN_FOUND_HEURISTIC",method,[],0,0,{"cost_dh":0,"action_count":0,"action_ids":[]},{"exhaustive":False,"nodes_evaluated":0,"max_nodes":max_nodes,"budget_exhausted":method=="greedy_fallback"},[],BASE_LIMITATIONS+["heuristic stalled; this does not prove infeasibility"])
-        choices.sort(key=lambda x:(-x[0]*x[1],x[2],x[3])); S=frozenset(set(S)|{choices[0][3]})
+        best = choices[0]
+        for choice in choices[1:]:
+            # Compare gain/(cost+1) exactly, then cost, then ASCII id.
+            if choice[0] * best[1] > best[0] * choice[1] or (choice[0] * best[1] == best[0] * choice[1] and (choice[2], choice[3]) < (best[2], best[3])):
+                best = choice
+        S=frozenset(set(S)|{best[3]})
 
 def solve_exact(scn,max_nodes):
     M=frozenset(a.id for a in scn.actions if a.mandatory); conflicts=_conflicts(scn,M)

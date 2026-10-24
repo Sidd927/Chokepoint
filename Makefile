@@ -6,10 +6,10 @@ BACKEND_PYTHON ?= backend/.venv/bin/python
 setup:
 	$(PYTHON) -m venv backend/.venv
 	$(BACKEND_PYTHON) -m pip install -e backend
-	cd frontend && npm install
+	cd frontend && npm ci
 
 backend-test:
-	PYTHONPATH=backend/src $(BACKEND_PYTHON) -m pytest backend/tests -q
+	PYTHONPATH=backend/src:backend $(BACKEND_PYTHON) -m pytest backend/tests -q
 
 frontend-test:
 	cd frontend && npm test -- --run

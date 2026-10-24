@@ -9,6 +9,8 @@ dist/
 frontend/playwright-report/
 frontend/test-results/
 .env
+.env.*
+!.env.example
 *.log
 .DS_Store
 .opencode/

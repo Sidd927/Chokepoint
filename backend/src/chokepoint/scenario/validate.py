@@ -1,5 +1,6 @@
 from __future__ import annotations
 import copy, re
+from dataclasses import replace
 from typing import Any
 from chokepoint.domain.errors import ScenarioError
 from chokepoint.domain.models import *
@@ -8,106 +9,220 @@ ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,63}$")
 KINDS = {"asset","server","workstation","plc","controller","gateway","external"}
 TOP = {"schema_version","id","name","description","synthetic","zones","assets","findings","rules","required_flows","origins","targets","actions","policy"}
 
+def _object(value, fields, path):
+    if type(value) is not dict:
+        raise ScenarioError("expected object", path=path)
+    if any(type(key) is not str or not key.isascii() for key in value):
+        raise ScenarioError("field names must be ASCII strings", path=path)
+    missing = sorted(fields - value.keys())
+    if missing:
+        raise ScenarioError("missing required field", path=f"/{missing[0]}" if not path else f"{path}/{missing[0]}")
+    if value.keys() - fields:
+        raise ScenarioError("unknown fields", path=path or "/")
+
+
 def _req(d, key, typ, path):
-    if key not in d or type(d[key]) is not typ:
+    value = d[key]
+    if type(value) is not typ:
         raise ScenarioError(f"expected {typ.__name__}", path=path)
-    return d[key]
-def _id(v, path):
-    if type(v) is not str or not ID_RE.fullmatch(v) or not v.isascii(): raise ScenarioError("invalid identifier", path=path)
+    if typ is str and any(0xD800 <= ord(char) <= 0xDFFF for char in value):
+        raise ScenarioError("invalid Unicode surrogate", path=path)
+    return value
+
+
+def _id(value, path):
+    if type(value) is not str or not ID_RE.fullmatch(value):
+        raise ScenarioError("invalid identifier", path=path)
+
+
+def _integer(value, low, high, path):
+    if type(value) is not int or not low <= value <= high:
+        raise ScenarioError(f"expected integer in [{low}, {high}]", path=path)
+
+
 def _list_ids(values, path):
-    if type(values) is not list: raise ScenarioError("expected list", path=path)
-    for i, v in enumerate(values): _id(v, f"{path}/{i}")
-    if len(set(values)) != len(values): raise ScenarioError("duplicate identifier", path=path)
+    if type(values) is not list:
+        raise ScenarioError("expected list", path=path)
+    for i, value in enumerate(values):
+        _id(value, f"{path}/{i}")
+    if len(set(values)) != len(values):
+        raise ScenarioError("duplicate identifier", path=path)
+
+
+def _reference(value, ids, path):
+    _id(value, path)
+    if value not in ids:
+        raise ScenarioError("unknown reference", path=path)
+
+
+def _unique(value, ids, path):
+    _id(value, path)
+    if value in ids:
+        raise ScenarioError("duplicate identifier", path=path)
+    ids.add(value)
+
 
 def parse_scenario(raw: dict[str, Any]) -> Scenario:
-    if type(raw) is not dict: raise ScenarioError("scenario must be an object")
-    extra = set(raw) - TOP
-    if extra: raise ScenarioError(f"unknown fields: {sorted(extra)}")
-    for k, typ in [("schema_version",str),("id",str),("name",str),("description",str),("synthetic",bool),("zones",list),("assets",list),("findings",list),("rules",list),("required_flows",list),("origins",list),("targets",list),("actions",list),("policy",dict)]: _req(raw,k,typ,f"/{k}")
-    if raw["schema_version"] != "1": raise ScenarioError("schema_version must be '1'", path="/schema_version")
+    _object(raw, TOP, "")
+    for key, typ in [("schema_version", str), ("id", str), ("name", str),
+                     ("description", str), ("synthetic", bool), ("zones", list),
+                     ("assets", list), ("findings", list), ("rules", list),
+                     ("required_flows", list), ("origins", list), ("targets", list),
+                     ("actions", list), ("policy", dict)]:
+        _req(raw, key, typ, f"/{key}")
+    if raw["schema_version"] != "1":
+        raise ScenarioError("schema_version must be '1'", path="/schema_version")
     _id(raw["id"], "/id")
-    zones=[]; zone_ids=[]
-    for i,z in enumerate(raw["zones"]):
-        if set(z) != {"id","name"}: raise ScenarioError("zone fields invalid",path=f"/zones/{i}")
-        _id(z["id"],f"/zones/{i}/id"); zone_ids.append(z["id"]); zones.append(Zone(z["id"],_req(z,"name",str,f"/zones/{i}/name")))
-    if len(set(zone_ids)) != len(zone_ids): raise ScenarioError("duplicate zone id",path="/zones")
-    findings=[]; finding_ids=[]
-    for i,f in enumerate(raw["findings"]):
-        if set(f) != {"id","title","description","synthetic"}: raise ScenarioError("finding fields invalid",path=f"/findings/{i}")
-        _id(f["id"],f"/findings/{i}/id"); finding_ids.append(f["id"]); findings.append(Finding(f["id"],_req(f,"title",str,""),_req(f,"description",str,""),_req(f,"synthetic",bool,"")))
-    if len(set(finding_ids)) != len(finding_ids): raise ScenarioError("duplicate finding id",path="/findings")
-    assets=[]; asset_ids=[]
-    for i,a in enumerate(raw["assets"]):
-        expected={"id","name","zone","kind","services","credentials"}
-        if set(a)!=expected: raise ScenarioError("asset fields invalid",path=f"/assets/{i}")
-        _id(a["id"],f"/assets/{i}/id"); asset_ids.append(a["id"])
-        if a["zone"] not in zone_ids: raise ScenarioError("unknown zone",path=f"/assets/{i}/zone")
-        if a["kind"] not in KINDS: raise ScenarioError("invalid asset kind",path=f"/assets/{i}/kind")
-        services=[]; service_ids=[]
-        for j,s in enumerate(a["services"]):
-            if set(s)!={"id","port","finding_ids"}: raise ScenarioError("service fields invalid",path=f"/assets/{i}/services/{j}")
-            _id(s["id"],f"/assets/{i}/services/{j}/id")
-            if type(s["port"]) is not int or not 1<=s["port"]<=65535: raise ScenarioError("invalid port",path=f"/assets/{i}/services/{j}/port")
-            _list_ids(s["finding_ids"],f"/assets/{i}/services/{j}/finding_ids")
-            if any(x not in finding_ids for x in s["finding_ids"]): raise ScenarioError("unknown finding",path=f"/assets/{i}/services/{j}/finding_ids")
-            service_ids.append(s["id"]); services.append(Service(s["id"],s["port"],tuple(sorted(s["finding_ids"]))))
-        if len(set(service_ids))!=len(service_ids): raise ScenarioError("duplicate service id",path=f"/assets/{i}/services")
-        creds=[]
-        for j,c in enumerate(a["credentials"]):
-            if set(c)!={"target_asset","service_id"}: raise ScenarioError("credential fields invalid",path=f"/assets/{i}/credentials/{j}")
-            creds.append(Credential(c["target_asset"],c["service_id"]))
-        assets.append(Asset(a["id"],a["name"],a["zone"],a["kind"],tuple(services),tuple(creds)))
-    if len(set(asset_ids))!=len(asset_ids) or set(asset_ids)&set(zone_ids): raise ScenarioError("asset ids must be unique and disjoint from zones",path="/assets")
-    asset_set=set(asset_ids)
-    assets_by_raw={a.id:a for a in assets}
-    for a in assets:
-        for c in a.credentials:
-            if c.target_asset not in asset_set: raise ScenarioError("credential target unknown")
-            if c.service_id not in {s.id for s in assets_by_raw[c.target_asset].services}: raise ScenarioError("credential service unknown")
-    rules=[]; rule_ids=[]
-    for i,r in enumerate(raw["rules"]):
-        if set(r)!={"id","src","dst","ports","label"}: raise ScenarioError("rule fields invalid",path=f"/rules/{i}")
-        _id(r["id"],f"/rules/{i}/id"); rule_ids.append(r["id"])
-        if r["src"] not in asset_set|set(zone_ids) or r["dst"] not in asset_set|set(zone_ids): raise ScenarioError("rule endpoint unknown",path=f"/rules/{i}")
-        ports=r["ports"]
-        if ports!="any":
-            if type(ports) is not list or any(type(x) is not int or not 1<=x<=65535 for x in ports) or ports!=sorted(set(ports)): raise ScenarioError("ports must be sorted unique ints or any",path=f"/rules/{i}/ports")
-            ports=tuple(ports)
-        rules.append(Rule(r["id"],r["src"],r["dst"],ports,r["label"]))
-    if len(set(rule_ids))!=len(rule_ids): raise ScenarioError("duplicate rule id",path="/rules")
-    flows=[]
-    for i,f in enumerate(raw["required_flows"]):
-        if set(f)!={"id","src","dst","port","description"}: raise ScenarioError("flow fields invalid",path=f"/required_flows/{i}")
-        _id(f["id"],f"/required_flows/{i}/id")
-        if f["src"] not in asset_set or f["dst"] not in asset_set or type(f["port"]) is not int: raise ScenarioError("flow reference invalid",path=f"/required_flows/{i}")
-        flows.append(Flow(f["id"],f["src"],f["dst"],f["port"],f["description"]))
-    _list_ids(raw["origins"],"/origins"); _list_ids(raw["targets"],"/targets")
-    if not raw["origins"] or not raw["targets"] or set(raw["origins"])&set(raw["targets"]): raise ScenarioError("origins and targets must be non-empty and disjoint")
-    if any(x not in asset_set for x in raw["origins"]+raw["targets"]): raise ScenarioError("origin/target unknown")
-    actions=[]; action_ids=[]
-    for i,a in enumerate(raw["actions"]):
-        expected={"id","kind","params","effort_dh","downtime_dh","mandatory","excludes","description"}
-        if set(a)!=expected: raise ScenarioError("action fields invalid",path=f"/actions/{i}")
-        _id(a["id"],f"/actions/{i}/id"); action_ids.append(a["id"])
-        if a["kind"] not in {"patch_finding","restrict_rule","remove_rule","vault_credentials"}: raise ScenarioError("invalid action kind")
-        if type(a["effort_dh"]) is not int or type(a["downtime_dh"]) is not int or min(a["effort_dh"],a["downtime_dh"])<0: raise ScenarioError("invalid action cost")
-        _list_ids(a["excludes"],f"/actions/{i}/excludes")
-        actions.append(Action(a["id"],a["kind"],dict(a["params"]),a["effort_dh"],a["downtime_dh"],a["mandatory"],tuple(sorted(a["excludes"])),a["description"]))
-    if len(set(action_ids))!=len(action_ids): raise ScenarioError("duplicate action id")
-    action_set=set(action_ids)
-    for a in actions:
-        if a.id in a.excludes or any(x not in action_set for x in a.excludes): raise ScenarioError("invalid exclusions")
-        if a.kind=="patch_finding" and (a.params.get("asset_id") not in asset_set or a.params.get("finding_id") not in finding_ids): raise ScenarioError("invalid patch action")
-        if a.kind in {"restrict_rule","remove_rule"} and a.params.get("rule_id") not in set(rule_ids): raise ScenarioError("invalid rule action")
-        if a.kind=="vault_credentials" and not any(x.id==a.params.get("asset_id") and x.credentials for x in assets): raise ScenarioError("invalid vault action")
-    amap={a.id:a for a in actions}
-    for a in actions:
-        for e in a.excludes:
-            if a.id not in amap[e].excludes: raise ScenarioError("exclusions must be symmetric")
-    policy=raw["policy"]
-    if set(policy)!={"max_cost_dh"} or (policy["max_cost_dh"] is not None and (type(policy["max_cost_dh"]) is not int or policy["max_cost_dh"]<0)): raise ScenarioError("invalid policy")
-    scenario=Scenario("1",raw["id"],raw["name"],raw["description"],raw["synthetic"],tuple(zones),tuple(assets),tuple(findings),tuple(rules),tuple(flows),tuple(sorted(raw["origins"])),tuple(sorted(raw["targets"])),tuple(actions),policy["max_cost_dh"],copy.deepcopy(raw))
+    for key, cap in (("assets", 500), ("rules", 2000), ("actions", 64)):
+        if len(raw[key]) > cap:
+            raise ScenarioError(f"entity cap exceeded ({cap})", path=f"/{key}")
+
+    zones, zone_ids = [], set()
+    for i, z in enumerate(raw["zones"]):
+        p = f"/zones/{i}"
+        _object(z, {"id", "name"}, p)
+        _unique(z["id"], zone_ids, p + "/id")
+        zones.append(Zone(z["id"], _req(z, "name", str, p + "/name")))
+
+    findings, finding_ids = [], set()
+    for i, f in enumerate(raw["findings"]):
+        p = f"/findings/{i}"
+        _object(f, {"id", "title", "description", "synthetic"}, p)
+        _unique(f["id"], finding_ids, p + "/id")
+        findings.append(Finding(f["id"], _req(f, "title", str, p + "/title"),
+                                _req(f, "description", str, p + "/description"),
+                                _req(f, "synthetic", bool, p + "/synthetic")))
+
+    assets, asset_ids = [], set()
+    for i, a in enumerate(raw["assets"]):
+        p = f"/assets/{i}"
+        _object(a, {"id", "name", "zone", "kind", "services", "credentials"}, p)
+        _unique(a["id"], asset_ids, p + "/id")
+        if a["id"] in zone_ids:
+            raise ScenarioError("asset and zone identifiers must be disjoint", path=p + "/id")
+        _req(a, "name", str, p + "/name")
+        _reference(a["zone"], zone_ids, p + "/zone")
+        if _req(a, "kind", str, p + "/kind") not in KINDS:
+            raise ScenarioError("invalid asset kind", path=p + "/kind")
+        services, service_ids = [], set()
+        for j, s in enumerate(_req(a, "services", list, p + "/services")):
+            sp = f"{p}/services/{j}"
+            _object(s, {"id", "port", "finding_ids"}, sp)
+            _unique(s["id"], service_ids, sp + "/id")
+            _integer(s["port"], 1, 65535, sp + "/port")
+            _list_ids(s["finding_ids"], sp + "/finding_ids")
+            for k, fid in enumerate(s["finding_ids"]):
+                _reference(fid, finding_ids, f"{sp}/finding_ids/{k}")
+            services.append(Service(s["id"], s["port"], tuple(sorted(s["finding_ids"]))))
+        creds = []
+        for j, c in enumerate(_req(a, "credentials", list, p + "/credentials")):
+            cp = f"{p}/credentials/{j}"
+            _object(c, {"target_asset", "service_id"}, cp)
+            _id(c["target_asset"], cp + "/target_asset")
+            _id(c["service_id"], cp + "/service_id")
+            creds.append(Credential(c["target_asset"], c["service_id"]))
+        assets.append(Asset(a["id"], a["name"], a["zone"], a["kind"], tuple(services), tuple(creds)))
+    assets_by_id = {a.id: a for a in assets}
+    for i, a in enumerate(assets):
+        for j, c in enumerate(a.credentials):
+            p = f"/assets/{i}/credentials/{j}"
+            _reference(c.target_asset, asset_ids, p + "/target_asset")
+            _reference(c.service_id, {s.id for s in assets_by_id[c.target_asset].services}, p + "/service_id")
+
+    rules, rule_ids = [], set()
+    for i, r in enumerate(raw["rules"]):
+        p = f"/rules/{i}"
+        _object(r, {"id", "src", "dst", "ports", "label"}, p)
+        _unique(r["id"], rule_ids, p + "/id")
+        for key in ("src", "dst"):
+            _reference(r[key], asset_ids | zone_ids, p + "/" + key)
+        _req(r, "label", str, p + "/label")
+        ports = r["ports"]
+        if ports == "any":
+            normalized_ports: tuple[int, ...] | str = "any"
+        else:
+            _req(r, "ports", list, p + "/ports")
+            for j, port in enumerate(ports):
+                _integer(port, 1, 65535, f"{p}/ports/{j}")
+            if ports != sorted(set(ports)):
+                raise ScenarioError("ports must be sorted and unique", path=p + "/ports")
+            normalized_ports = tuple(ports)
+        rules.append(Rule(r["id"], r["src"], r["dst"], normalized_ports, r["label"]))
+
+    flows, flow_ids = [], set()
+    for i, f in enumerate(raw["required_flows"]):
+        p = f"/required_flows/{i}"
+        _object(f, {"id", "src", "dst", "port", "description"}, p)
+        _unique(f["id"], flow_ids, p + "/id")
+        for key in ("src", "dst"):
+            _reference(f[key], asset_ids, p + "/" + key)
+        _integer(f["port"], 1, 65535, p + "/port")
+        _req(f, "description", str, p + "/description")
+        flows.append(Flow(f["id"], f["src"], f["dst"], f["port"], f["description"]))
+    for key in ("origins", "targets"):
+        _list_ids(raw[key], "/" + key)
+        if not raw[key]:
+            raise ScenarioError("must be non-empty", path="/" + key)
+        for i, aid in enumerate(raw[key]):
+            _reference(aid, asset_ids, f"/{key}/{i}")
+    if set(raw["origins"]) & set(raw["targets"]):
+        raise ScenarioError("origins and targets must be disjoint", path="/targets")
+
+    actions, action_ids = [], set()
+    param_fields = {"patch_finding": {"asset_id", "finding_id"},
+                    "restrict_rule": {"rule_id"}, "remove_rule": {"rule_id"},
+                    "vault_credentials": {"asset_id"}}
+    for i, a in enumerate(raw["actions"]):
+        p = f"/actions/{i}"
+        _object(a, {"id", "kind", "params", "effort_dh", "downtime_dh", "mandatory", "excludes", "description"}, p)
+        _unique(a["id"], action_ids, p + "/id")
+        kind = _req(a, "kind", str, p + "/kind")
+        if kind not in param_fields:
+            raise ScenarioError("invalid action kind", path=p + "/kind")
+        params = a["params"]
+        _object(params, param_fields[kind], p + "/params")
+        for key in sorted(params):
+            _reference(params[key], rule_ids if key == "rule_id" else asset_ids if key == "asset_id" else finding_ids, p + "/params/" + key)
+        if kind == "patch_finding" and not any(params["finding_id"] in s.finding_ids for s in assets_by_id[params["asset_id"]].services):
+            raise ScenarioError("finding is not present on asset", path=p + "/params/finding_id")
+        if kind == "vault_credentials" and not assets_by_id[params["asset_id"]].credentials:
+            raise ScenarioError("asset has no credentials", path=p + "/params/asset_id")
+        for key in ("effort_dh", "downtime_dh"):
+            _integer(a[key], 0, 100000, p + "/" + key)
+        _req(a, "mandatory", bool, p + "/mandatory")
+        _req(a, "description", str, p + "/description")
+        _list_ids(a["excludes"], p + "/excludes")
+        actions.append(Action(a["id"], kind, dict(params), a["effort_dh"], a["downtime_dh"], a["mandatory"], tuple(a["excludes"]), a["description"]))
+    closed = {a.id: set(a.excludes) for a in actions}
+    for i, a in enumerate(actions):
+        for j, excluded in enumerate(a.excludes):
+            p = f"/actions/{i}/excludes/{j}"
+            _reference(excluded, action_ids, p)
+            if excluded == a.id:
+                raise ScenarioError("action cannot exclude itself", path=p)
+            closed[excluded].add(a.id)
+    actions = [replace(a, excludes=tuple(sorted(closed[a.id]))) for a in actions]
+    policy = raw["policy"]
+    _object(policy, {"max_cost_dh"}, "/policy")
+    if policy["max_cost_dh"] is not None:
+        _integer(policy["max_cost_dh"], 0, 10000000, "/policy/max_cost_dh")
+    scenario = Scenario("1", raw["id"], raw["name"], raw["description"], raw["synthetic"], tuple(zones), tuple(assets), tuple(findings), tuple(rules), tuple(flows), tuple(sorted(raw["origins"])), tuple(sorted(raw["targets"])), tuple(actions), policy["max_cost_dh"], copy.deepcopy(raw))
     from chokepoint.graph.semantics import flow_permitted
-    for f in scenario.required_flows:
-        if not flow_permitted(scenario,f.src,f.dst,f.port,frozenset()): raise ScenarioError("required flow is not permitted in the unmodified scenario", "REQUIRED_FLOW_NOT_PERMITTED", f"/required_flows/{f.id}")
-    return scenario
+    for i, f in enumerate(scenario.required_flows):
+        if not flow_permitted(scenario,f.src,f.dst,f.port,frozenset()): raise ScenarioError("required flow is not permitted in the unmodified scenario", "REQUIRED_FLOW_NOT_PERMITTED", f"/required_flows/{i}")
+    warnings=[]
+    initial_reach = __import__("chokepoint.graph.semantics", fromlist=["reachable"]).reachable(scenario)
+    for a in actions:
+        if a.cost_dh == 0: warnings.append({"code":"ZERO_COST_ACTION","message":f"{a.id} has zero cost","path":f"/actions/{a.id}"})
+        if not a.mandatory and a.kind == "restrict_rule" and not __import__("chokepoint.graph.semantics", fromlist=["required_set"]).required_set(scenario, scenario.rules_by_id[a.params["rule_id"]]):
+            warnings.append({"code":"EMPTY_RESTRICT","message":f"{a.id} restricts no required-flow triple","path":f"/actions/{a.id}"})
+        if not a.mandatory:
+            graph_semantics = __import__("chokepoint.graph.semantics", fromlist=["graph"])
+            before_graph = graph_semantics.graph(scenario)
+            after_graph = graph_semantics.graph(scenario, frozenset({a.id}))
+            if before_graph == after_graph: warnings.append({"code":"INERT_ACTION","message":f"{a.id} neutralises no initial graph reason","path":f"/actions/{a.id}"})
+    effects = [(a.kind, tuple(sorted(a.params.items()))) for a in actions]
+    for i, effect in enumerate(effects):
+        if effect in effects[:i]: warnings.append({"code":"DUPLICATE_EFFECT","message":f"duplicate effect for {actions[i].id}","path":f"/actions/{i}"})
+    if any(t not in initial_reach for t in scenario.targets): warnings.append({"code":"UNREACHABLE_TARGET","message":"one or more targets are not initially reachable","path":"/targets"})
+    return Scenario(scenario.schema_version,scenario.id,scenario.name,scenario.description,scenario.synthetic,scenario.zones,scenario.assets,scenario.findings,scenario.rules,scenario.required_flows,scenario.origins,scenario.targets,scenario.actions,scenario.max_cost_dh,scenario.raw,tuple(sorted(warnings,key=lambda x:(x["code"],x["path"]))))

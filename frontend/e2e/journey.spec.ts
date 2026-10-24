@@ -1,0 +1,45 @@
+import {test,expect} from '@playwright/test';
+test('DEMO planning, graph, verification and receipt journey',async({page})=>{
+  await page.goto('/');
+  await expect(page.getByTestId('scenario-card').first()).toBeVisible();
+  await page.getByTestId('scenario-card').filter({hasText:'Demo'}).click();
+  await expect(page.getByTestId('graph-canvas')).toBeVisible({timeout:30000});
+  await page.getByTestId('layer-permissions').check();
+  await page.getByRole('button',{name:'Fit'}).click();
+  await page.getByTestId('layer-permissions').uncheck();
+  await page.getByRole('button',{name:'Inspect'}).click();
+  await expect(page.getByRole('heading',{name:'Inspect'})).toBeVisible();
+  await page.getByRole('button',{name:'Plan'}).click();
+  await page.getByTestId('compute-plan').click();
+  await expect(page.getByTestId('solver-status')).toBeVisible({timeout:30000});
+  await expect(page.getByRole('button',{name:'After'})).toBeVisible();
+  await page.getByRole('button',{name:'Before'}).click();
+  await page.getByRole('button',{name:'After'}).click();
+  await page.getByRole('button',{name:'Verify'}).click();
+  await page.getByLabel('Claimed total cost').fill('not-a-cost');
+  await page.getByTestId('verify-run').click();
+  await expect(page.getByRole('alert')).toContainText('Claimed cost');
+  await page.getByLabel('Claimed total cost').fill('999999');
+  await page.getByTestId('verify-run').click();
+  await expect(page.getByTestId('verify-verdict')).toContainText('REJECTED');
+  await expect(page.getByTestId('verify-verdict')).toContainText('COST_CLAIM_MATCHES');
+  await page.getByLabel('Claimed total cost').fill('');
+  await page.getByTestId('verify-run').click();
+  await expect(page.getByTestId('verify-verdict')).toContainText('VERIFIED',{timeout:30000});
+  await page.getByRole('button',{name:'Compare'}).click();
+  await expect(page.getByTestId('compare-before')).toBeVisible();
+  await page.getByRole('button',{name:'Receipt'}).click();
+  await expect(page.getByTestId('receipt-json')).toBeVisible();
+  await page.getByTestId('receipt-copy').click();
+  await expect(page.getByTestId('receipt-download')).toHaveAttribute('download', /receipt\.json$/);
+  await page.getByTestId('receipt-reverify').click();
+  await expect(page.getByTestId('receipt-integrity')).toContainText('Receipt fingerprint matches');
+});
+
+test('DEMO stays usable at a 360px viewport', async ({page}) => {
+  await page.setViewportSize({width: 360, height: 740});
+  await page.goto('/');
+  await page.getByTestId('scenario-card').filter({hasText:'Demo'}).click();
+  await expect(page.getByTestId('graph-canvas')).toBeVisible();
+  await expect(page.locator('meta[name="viewport"]')).toHaveAttribute('content', /width=device-width/);
+});

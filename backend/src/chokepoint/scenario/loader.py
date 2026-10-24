@@ -5,6 +5,9 @@ from .validate import parse_scenario
 
 def load_path(path: str | Path):
     p = Path(path)
+    if p.stat().st_size > 1024 * 1024:
+        from chokepoint.domain.errors import ScenarioError
+        raise ScenarioError("scenario exceeds 1 MiB document cap")
     raw = json.loads(p.read_text(encoding="utf-8"))
     return parse_scenario(raw)
 

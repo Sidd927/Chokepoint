@@ -1,46 +1,68 @@
 from __future__ import annotations
-import os, json
+import os, json, re
 from datetime import datetime, timezone
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 from chokepoint.scenario.loader import ScenarioStore
 from chokepoint.graph.semantics import graph, reachable, witness, granting_rules, flow_permitted
 from chokepoint.solver.exact import solve_exact, greedy
 from chokepoint_verifier.checks import verify
-from chokepoint_verifier.fingerprint import scenario_fingerprint
+from chokepoint_verifier.fingerprint import scenario_fingerprint, normalize
 from chokepoint import __version__
 
 SCENARIO_DIR=os.getenv("CHOKEPOINT_SCENARIO_DIR", "backend/scenarios")
 store=ScenarioStore(SCENARIO_DIR)
 app=FastAPI(title="CHOKEPOINT API",version=__version__)
+app.add_middleware(CORSMiddleware, allow_origins=[x.strip() for x in os.getenv("CHOKEPOINT_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if x.strip()], allow_methods=["*"], allow_headers=["*"])
 
 class GraphRequest(BaseModel):
     model_config=ConfigDict(extra="forbid")
-    scenario_id: str
-    action_ids: list[str]=[]
+    scenario_id: StrictStr
+    action_ids: list[StrictStr]=Field(default_factory=list)
 class PlanRequest(BaseModel):
     model_config=ConfigDict(extra="forbid")
-    scenario_id: str
-    strategy: str="exact"
-    max_nodes: int=Field(default=int(os.getenv("CHOKEPOINT_DEFAULT_MAX_NODES","200000")),ge=1,le=int(os.getenv("CHOKEPOINT_MAX_NODES_CAP","2000000")))
+    scenario_id: StrictStr
+    strategy: StrictStr="exact"
+    max_nodes: StrictInt=Field(default=int(os.getenv("CHOKEPOINT_DEFAULT_MAX_NODES","200000")),ge=1,le=int(os.getenv("CHOKEPOINT_MAX_NODES_CAP","2000000")))
 class VerifyRequest(BaseModel):
     model_config=ConfigDict(extra="forbid")
-    scenario_id: str
-    action_ids: list[str]=[]
-    claimed_total_cost_dh: int|None=None
-    claimed_solver_status: str|None=None
+    scenario_id: StrictStr
+    action_ids: list[StrictStr]=Field(default_factory=list)
+    claimed_total_cost_dh: StrictInt|None=None
+    claimed_solver_status: StrictStr|None=None
 
 def error(code,message,details=None,status=422): return JSONResponse(status_code=status,content={"error":{"code":code,"message":message,"details":details or []}})
 def get_scenario(sid): return store.get(sid)
 def now(): return datetime.now(timezone.utc).isoformat().replace("+00:00","Z")
 def serial_scenario(s):
-    raw=json.loads(json.dumps(s.raw)); raw["fingerprint"]=scenario_fingerprint(s.raw); raw["warnings"]=[]; return raw
+    raw=normalize(s.raw); raw["fingerprint"]=scenario_fingerprint(s.raw); raw["warnings"]=list(s.warnings); return raw
 
 @app.exception_handler(Exception)
 async def handler(request, exc):
     if isinstance(exc, ValueError): return error("INVALID_REQUEST",str(exc))
     return error("INTERNAL_ERROR","internal error",status=500)
+
+@app.exception_handler(RequestValidationError)
+async def validation_handler(request, exc):
+    details=[{"path":"".join(f"/{part}" for part in e.get("loc",())[1:]),"message":e.get("msg","invalid request")} for e in exc.errors()]
+    return error("INVALID_REQUEST","request validation failed",details)
+
+@app.middleware("http")
+async def body_limit(request: Request, call_next):
+    length=request.headers.get("content-length")
+    if length and length.isdigit() and int(length)>256*1024:
+        return error("PAYLOAD_TOO_LARGE","request body exceeds 256 KiB",status=413)
+    if request.method in {"POST","PUT","PATCH"}:
+        body=await request.body()
+        if len(body)>256*1024:
+            return error("PAYLOAD_TOO_LARGE","request body exceeds 256 KiB",status=413)
+        async def receive():
+            return {"type":"http.request","body":body,"more_body":False}
+        request._receive=receive
+    return await call_next(request)
 
 @app.get("/api/v1/health")
 def health(): return {"status":"ok","version":__version__,"schema_version":"1","scenarios_loaded":len(store.scenarios)}
@@ -52,6 +74,7 @@ def scenarios():
     return {"scenarios":out}
 @app.get("/api/v1/scenarios/{scenario_id}")
 def scenario_detail(scenario_id):
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{0,63}", scenario_id): return error("INVALID_REQUEST","malformed scenario id")
     s=get_scenario(scenario_id)
     if not s: return error("SCENARIO_NOT_FOUND","scenario not found",status=404)
     return serial_scenario(s)
@@ -79,7 +102,7 @@ def plan(req: PlanRequest):
     if req.strategy not in {"exact","greedy"}: return error("INVALID_REQUEST","strategy must be exact or greedy")
     result=solve_exact(s,req.max_nodes) if req.strategy=="exact" else greedy(s,req.max_nodes)
     verification=None; receipt=None; actions=[]
-    if result.action_ids:
+    if result.solver_status in {"OPTIMAL", "FEASIBLE_NOT_PROVEN"}:
         verification=verify_plan(s,result)
         if verification["verdict"]!="VERIFIED": return error("INTERNAL_VERIFICATION_FAILURE","verifier rejected solver plan",status=500)
         receipt=verification["receipt"]
