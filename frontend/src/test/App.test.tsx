@@ -3,10 +3,10 @@ import {cleanup,render,screen,waitFor,fireEvent} from '@testing-library/react';
 import {MemoryRouter} from 'react-router-dom';
 import {App} from '../pages/App';
 
-vi.mock('cytoscape', () => ({default: (options: {elements?: unknown[]}) => {
-  const edges: {data: (key?: string) => unknown; addClass: () => void}[] = [];
-  return {edges: () => edges, nodes: () => ({addClass: () => {}}), on: () => {}, fit: () => {}, zoom: () => 1, reset: () => {}, destroy: () => {},
-    _elements: options.elements || []};
+// Cytoscape needs a real canvas; a chainable stub is enough to test the React layer.
+vi.mock('cytoscape', () => ({default: () => {
+  const chain: unknown = new Proxy(function () {}, {get: (_t, key) => key === 'length' ? 0 : key === 'zoom' ? () => 1 : key === 'width' || key === 'height' ? () => 400 : () => chain, apply: () => chain});
+  return chain;
 }}));
 
 beforeEach(()=>{

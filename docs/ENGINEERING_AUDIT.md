@@ -1,3 +1,5 @@
+> **Superseded in part (2026-10-24).** Written in an earlier cloud environment. Current test counts, the Playwright result, bundle size and push state are in [PROJECT_STATUS.md](PROJECT_STATUS.md); the UI was redesigned afterwards (see [DESIGN.md](../DESIGN.md)).
+
 # Engineering audit and hardening record
 
 Date: 2026-10-24. Scope: current Chokepoint repository at the existing local `main` branch. The configured remote was verified as the Chokepoint repository and no push was performed. ChronoForge was not modified.

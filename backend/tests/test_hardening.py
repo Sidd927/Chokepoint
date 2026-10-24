@@ -143,3 +143,16 @@ def test_verifier_reports_unknown_duplicate_and_missing_mandatory_actions():
     result=verify(raw,["UNKNOWN","UNKNOWN"])
     codes={x["code"] for x in result["violations"]}
     assert {"PLAN_IDS_KNOWN","PLAN_IDS_UNIQUE","PLAN_HAS_MANDATORY"} <= codes
+
+
+def test_budget_exhaustion_is_reported_when_exact_search_falls_back_to_greedy():
+    from chokepoint.scenario.loader import load_path
+    from chokepoint.solver.exact import greedy, solve_exact
+    scenario = load_path(str(ROOT / "scenarios/demo_city.json"))
+    fallback = solve_exact(scenario, 1)
+    assert fallback.solver_status == "FEASIBLE_NOT_PROVEN" and fallback.method == "greedy_fallback"
+    assert fallback.proof["budget_exhausted"] is True and fallback.proof["exhaustive"] is False
+    # A plain greedy run was never limited by a budget, so it must not claim exhaustion.
+    assert greedy(scenario, 1).proof["budget_exhausted"] is False
+    full = solve_exact(scenario, 200000)
+    assert full.solver_status == "OPTIMAL" and full.proof["budget_exhausted"] is False

@@ -41,8 +41,8 @@ export type Verification = {
 };
 export type Plan = {
   solver_status: string; action_ids: string[] | null; total_cost_dh: number | null;
-  action_count: number; actions: Action[]; proof?: {nodes_evaluated?: number};
-  verification: Verification | null; receipt: Receipt | null; limitations?: string[];
+  action_count: number; actions: Action[]; proof?: {exhaustive?: boolean; budget_exhausted?: boolean; nodes_evaluated?: number; max_nodes?: number};
+  verification: Verification | null; receipt: Receipt | null; limitations?: string[]; method?: string;
 };
 export type VerifyRequest = {
   scenario_id: string; action_ids: string[]; claimed_total_cost_dh?: number;

@@ -29,7 +29,7 @@ def greedy(scn, max_nodes=0, method="greedy"):
         if any(not flow_permitted(scn,f.src,f.dst,f.port,S) for f in scn.required_flows): break
         W=witness(scn,S)
         if W is None:
-            ids=sorted(S); c=_cost(scn,S); return SolveResult("FEASIBLE_NOT_PROVEN",method,ids,c,len(ids),{"cost_dh":c,"action_count":len(ids),"action_ids":ids},{"exhaustive":False,"nodes_evaluated":0,"max_nodes":max_nodes,"budget_exhausted":False},[],BASE_LIMITATIONS+["heuristic result; not proven optimal"])
+            ids=sorted(S); c=_cost(scn,S); return SolveResult("FEASIBLE_NOT_PROVEN",method,ids,c,len(ids),{"cost_dh":c,"action_count":len(ids),"action_ids":ids},{"exhaustive":False,"nodes_evaluated":0,"max_nodes":max_nodes,"budget_exhausted":method=="greedy_fallback"},[],BASE_LIMITATIONS+["heuristic result; not proven optimal"])
         base=reasons_reachable(scn,S); choices=[]
         for aid in candidates(scn,S,W):
             T=S|{aid}

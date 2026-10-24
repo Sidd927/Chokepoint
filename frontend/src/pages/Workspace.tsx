@@ -1,52 +1,86 @@
-import {useMemo, useState} from 'react';
+import {Suspense, lazy, useMemo, useState} from 'react';
 import {Link} from 'react-router-dom';
-import {GraphCanvas} from '../components/GraphCanvas';
+import type {Action, Scenario} from '../api/client';
+import {Legend} from '../components/Legend';
+import type {GraphSelection, Layers} from '../components/GraphCanvas';
 import {Shell} from '../components/Shell';
+import type {NavItem} from '../components/Shell';
+import {Callout, Chip} from '../components/ui';
+import {assetName} from '../lib/explain';
 import {useWorkspace} from '../state/useWorkspace';
-import type {Action, Graph, Scenario} from '../api/client';
+import type {Tab} from '../state/useWorkspace';
+import {ComparePanel, InspectPanel, PlanPanel, ReceiptPanel, VerifyPanel} from './Panels';
 
-function Inspect({scenario, graph, highlight}: {scenario: Scenario; graph: Graph; highlight: (action?: Action) => void}) {
-  return <div><span className="eyebrow">Model inventory</span><h2>Inspect</h2><p className="muted">Every item below is loaded from the scenario API.</p>
-    <div className="metric-grid"><div><strong>{scenario.assets.length}</strong><span>assets</span></div><div><strong>{scenario.rules.length}</strong><span>allow rules</span></div><div><strong>{scenario.required_flows.length}</strong><span>required flows</span></div><div><strong>{scenario.targets.length}</strong><span>critical targets</span></div></div>
-    <h3>Assets and services</h3>{scenario.assets.map(asset => <div className="asset-line" key={asset.id}><b>{asset.name}</b><span>{asset.id} · {asset.kind} · zone {asset.zone}</span><small>{asset.services.map(service => `${service.id}:${service.port}`).join(', ') || 'No exposed services'}{asset.credentials.length ? ` · ${asset.credentials.length} credential links` : ''}</small></div>)}
-    <h3>Findings</h3>{scenario.findings.map(finding => <div className="asset-line" key={finding.id}><b>{finding.id} · {finding.title}</b><span>{finding.description}</span></div>)}
-    <h3>Action catalogue</h3>{scenario.actions.map(action => <button className="action-line interactive-action" type="button" key={action.id} onClick={() => highlight(action)} onMouseEnter={() => highlight(action)} onFocus={() => highlight(action)} onMouseLeave={() => highlight()} onBlur={() => highlight()}><span><b>{action.id}</b><span>{action.description}</span></span><small>{action.kind} · {action.cost_dh ?? ((action.effort_dh || 0) + 2 * (action.downtime_dh || 0))} dh {action.mandatory && '· mandatory'}</small></button>)}
-    <h3>Required flows</h3>{graph.flows.map(flow => <div className="flow" key={flow.id}><span>{flow.id}</span><strong className={flow.permitted ? 'flow-ok' : 'flow-bad'}>{flow.permitted ? 'Permitted' : 'Broken'}</strong></div>)}</div>;
-}
+// Cytoscape is large; it is only fetched when a scenario workspace opens.
+const GraphCanvas = lazy(() => import('../components/GraphCanvas').then(module => ({default: module.GraphCanvas})));
 
-function PlanView({state, highlight}: {state: ReturnType<typeof useWorkspace>; highlight: (action?: Action) => void}) {
-  const {scenario, plan, strategy, maxNodes, busy} = state;
-  if (!scenario) return null;
-  return <div><span className="eyebrow">Decision support</span><h2>Plan remediation</h2><div className="form-grid"><label>Strategy<select value={strategy} onChange={event => state.editStrategy(event.target.value)}><option value="exact">Exact search</option><option value="greedy">Greedy heuristic</option></select></label><label>Search budget<input aria-label="Search budget" type="number" min="1" max="2000000" value={maxNodes} onChange={event => state.editBudget(event.target.value)}/></label></div><button data-testid="compute-plan" className="primary-action" onClick={state.compute} disabled={busy}>{busy ? 'Computing model…' : 'Compute plan'}</button>
-    {plan && <div className={`plan-result status-${String(plan.solver_status).toLowerCase()}`}><div className="status-row"><div><span className="eyebrow">Solver outcome</span><h3 data-testid="solver-status">{plan.solver_status}</h3></div><p>{plan.solver_status === 'OPTIMAL' ? 'Exact search completed; this is the catalogue optimum.' : plan.solver_status === 'FEASIBLE_NOT_PROVEN' ? 'A feasible plan was found, but the search did not prove optimality.' : 'The solver did not produce a verified remediation plan.'}</p></div>
-      {plan.action_ids?.length === 0 && plan.solver_status === 'OPTIMAL' ? <p className="empty-success">No remediation required for this model.</p> : <><div className="plan-metrics"><div><strong data-testid="plan-cost">{plan.total_cost_dh ?? '—'} dh</strong><span>total cost</span></div><div><strong>{plan.action_count}</strong><span>actions</span></div><div><strong>{plan.proof?.nodes_evaluated ?? 0}</strong><span>states evaluated</span></div></div>{plan.actions?.map(action => <button type="button" className="action-line interactive-action" key={action.id} onClick={() => highlight(action)} onMouseEnter={() => highlight(action)} onFocus={() => highlight(action)} onMouseLeave={() => highlight()} onBlur={() => highlight()}><span><b>{action.id}</b><span>{action.description}</span></span><small>{action.cost_dh ?? 0} dh</small></button>)}</>}</div>}</div>;
-}
+const STEPS: {tab: Tab; hint: string}[] = [
+  {tab: 'Inspect', hint: 'The modelled network'}, {tab: 'Plan', hint: 'Choose remediation'}, {tab: 'Verify', hint: 'Independent check'},
+  {tab: 'Compare', hint: 'Before and after'}, {tab: 'Receipt', hint: 'SHA-256 evidence'},
+];
+const LAYERS: {key: keyof Layers; label: string; help: string}[] = [
+  {key: 'attack', label: 'Attack steps', help: 'Modelled exploit and credential-reuse steps'}, {key: 'witness', label: 'Example path', help: 'One shortest attack path to a critical target'},
+  {key: 'flows', label: 'Required flows', help: 'Operational flows that must keep working'}, {key: 'permissions', label: 'Firewall rules', help: 'Allow-rules in the scenario'},
+];
 
-function VerifyView({state}: {state: ReturnType<typeof useWorkspace>}) {
-  const {scenario, selected, claim, verification, busy} = state;
-  if (!scenario) return null;
-  return <div><span className="eyebrow">Independent check</span><h2>Verify a plan</h2><p className="muted">The verifier recomputes costs, flows, and reachability from the raw scenario. It does not trust solver claims.</p>{scenario.actions.map(action => <label className="check" key={action.id}><input data-testid="check-row" type="checkbox" checked={selected.includes(action.id)} onChange={event => state.editSelected(event.target.checked ? [...selected, action.id] : selected.filter(id => id !== action.id))}/><span><b>{action.id}</b> {action.description}</span></label>)}<label>Claimed total cost <input aria-label="Claimed total cost" inputMode="numeric" value={claim} onChange={event => state.editClaim(event.target.value)}/></label><button data-testid="verify-run" className="primary-action" onClick={state.verify} disabled={busy}>Run independent verification</button>{verification && <div data-testid="verify-verdict" className={`verification ${verification.verdict === 'VERIFIED' ? 'verified' : 'rejected'}`}><h3>{verification.verdict}</h3>{verification.checks?.map(check => <div className="check-result" key={check.code}><span>{check.passed ? '✓' : '×'}</span><b>{check.code}</b><small>{check.detail}</small></div>)}{verification.violations?.map(violation => <p className="violation" key={violation.code}>{violation.code}: {violation.detail}</p>)}{state.receipt && <button type="button" className="secondary-action" onClick={() => state.setTab('Receipt')}>Open generated receipt</button>}</div>}</div>;
-}
-
-function Compare({before, after, plan}: {before?: Graph; after?: Graph; plan?: {action_count: number}}) {
-  const neutral = !after;
-  return <div><span className="eyebrow">Decision delta</span><h2>Before / after</h2><div className="compare"><div data-testid="compare-before"><span className="eyebrow">Before</span><strong>{before?.reachable_targets.length ?? '—'}</strong><p>reachable targets</p><small>{before?.edges.length ?? '—'} logical edges</small></div><div data-testid="compare-after" className={neutral ? 'neutral' : ''}><span className="eyebrow">After</span><strong>{after?.reachable_targets.length ?? '—'}</strong><p>{neutral ? 'compute a plan to compare' : 'reachable targets'}</p><small>{after ? `${after.edges.length} logical edges · ${plan?.action_count ?? 0} actions` : '—'}</small></div></div><p className="muted">A model comparison, not a deployment confirmation.</p></div>;
-}
-
-function Receipt({receipt, onReverify, busy, integrity}: {receipt?: ReturnType<typeof useWorkspace>['receipt']; onReverify: () => void; busy: boolean; integrity?: ReturnType<typeof useWorkspace>['integrity']}) {
-  const [copyError, setCopyError] = useState('');
-  if (!receipt) return <div className="empty-state"><h2>No receipt yet</h2><p>Compute and verify a plan to generate a deterministic receipt.</p></div>;
-  const json = JSON.stringify(receipt, null, 2);
-  const copy = async () => { try { await navigator.clipboard.writeText(json); setCopyError(''); } catch { setCopyError('Copy failed. Your browser did not grant clipboard access; use Download instead.'); } };
-  return <div><span className="eyebrow">Integrity record</span><h2>Receipt</h2><pre data-testid="receipt-json">{json}</pre><div className="receipt-actions"><button data-testid="receipt-copy" onClick={copy}>Copy JSON</button><a data-testid="receipt-download" download={`chokepoint-${receipt.scenario_fingerprint.slice(7, 15)}.receipt.json`} href={`data:application/json;charset=utf-8,${encodeURIComponent(json)}`}>Download</a><button data-testid="receipt-reverify" onClick={onReverify} disabled={busy}>Re-verify displayed receipt</button></div>{copyError && <div role="alert" className="notice error">{copyError}</div>}{integrity && <div data-testid="receipt-integrity" className={`notice ${integrity.matches ? 'success' : 'error'}`}><strong>{integrity.matches ? 'Receipt fingerprint matches' : 'Receipt fingerprint mismatch'}</strong><small>Expected {integrity.expected}<br/>Returned {integrity.actual}<br/>Verdict {integrity.verdict}</small></div>}<p className="muted">The fingerprint is a SHA-256 integrity digest. It is not a signature, authentication, tamper-proof storage, or proof of real-world security.</p></div>;
+function Detail({selection, scenario}: {selection: GraphSelection; scenario: Scenario}) {
+  const d = selection.data as Record<string, any>;
+  if (selection.type === 'node') {
+    const asset = scenario.assets.find(item => item.id === d.id);
+    const zone = scenario.zones.find(item => item.id === asset?.zone);
+    return <div className="detail" data-testid="selection-detail"><div className="detail-head"><strong>{String(d.label)}</strong><span className="mono">{String(d.id)}</span>
+      <Chip>{String(d.kind)}</Chip>{d.origin && <Chip tone="accent">attacker origin</Chip>}{d.target && <Chip tone="risk">critical target</Chip>}<Chip tone={d.reachable ? 'risk' : 'ok'}>{d.reachable ? 'reachable' : 'not reachable'}</Chip></div>
+      <dl><div><dt>Zone</dt><dd>{zone?.name ?? asset?.zone}</dd></div>
+        <div><dt>Services</dt><dd>{asset?.services.map(service => <span key={service.id} className="mono svc">{service.id}:{service.port}{service.finding_ids.length ? ` (${service.finding_ids.map(id => scenario.findings.find(finding => finding.id === id)?.title ?? id).join(', ')})` : ''}</span>)}{!asset?.services.length && 'none exposed'}</dd></div>
+        <div><dt>Stored credentials</dt><dd>{asset?.credentials.map(credential => `${credential.service_id} on ${assetName(scenario, credential.target_asset)}`).join(', ') || 'none'}</dd></div></dl></div>;
+  }
+  const from = assetName(scenario, d.source); const to = assetName(scenario, d.target);
+  if (d.edgeType === 'flow') return <div className="detail" data-testid="selection-detail"><div className="detail-head"><strong>Required flow {String(d.label)}</strong><Chip tone={d.permitted ? 'ok' : 'risk'}>{d.permitted ? 'permitted' : 'broken'}</Chip></div>
+    <p>{String(d.description)}: {from} → {to}. Granted by rule {(d.granting_rule_ids as string[]).join(', ') || 'none'}.</p></div>;
+  if (d.edgeType === 'permission') return <div className="detail" data-testid="selection-detail"><div className="detail-head"><strong>Firewall rule {String(d.label)}</strong><Chip tone={d.status === 'restricted' ? 'accent' : 'neutral'}>{String(d.status)}</Chip></div><p>{String(d.ruleLabel)}: {from} → {to}.</p></div>;
+  const blocked = d.edgeType === 'blocked';
+  return <div className="detail" data-testid="selection-detail"><div className="detail-head"><strong>{from} → {to}</strong><Chip tone={blocked ? 'ok' : 'risk'}>{blocked ? 'blocked by plan' : 'modelled attack step'}</Chip></div>
+    <ul className="bullets">{(d.reasons as {type: string; service_id: string; port: number; finding_id?: string; rule_ids: string[]}[]).map((reason, index) => <li key={index}>
+      {reason.type === 'exploit' ? `Exploit ${reason.finding_id} (${scenario.findings.find(finding => finding.id === reason.finding_id)?.title ?? ''}) on service ${reason.service_id}:${reason.port}` : `Reuse stored credentials for service ${reason.service_id}:${reason.port}`}
+      {` · allowed by rule ${reason.rule_ids.join(', ')}`}</li>)}</ul></div>;
 }
 
 export function Workspace({id}: {id: string}) {
-  const state = useWorkspace(id); const [layers, setLayers] = useState({attack: true, permissions: false, flows: true, witness: false}); const [selection, setSelection] = useState<{type: 'node' | 'edge'; data: Record<string, unknown>}>(); const [highlighted, setHighlighted] = useState<Action>();
+  const state = useWorkspace(id);
+  const [layers, setLayers] = useState<Layers>({attack: true, witness: true, flows: true, permissions: false});
+  const [selection, setSelection] = useState<GraphSelection>();
+  const [highlighted, setHighlighted] = useState<Action>();
   const {scenario, before, graph, error, tab, setTab} = state;
-  const tabContent = useMemo(() => { if (!scenario || !graph) return null; if (tab === 'Inspect') return <Inspect scenario={scenario} graph={graph} highlight={setHighlighted}/>; if (tab === 'Plan') return <PlanView state={state} highlight={setHighlighted}/>; if (tab === 'Verify') return <VerifyView state={state}/>; if (tab === 'Compare') return <Compare before={before} after={state.after} plan={state.plan}/>; return <Receipt receipt={state.receipt} onReverify={state.reverify} busy={state.busy} integrity={state.integrity}/>; }, [tab, scenario, graph, before, state]);
-  if (error && !scenario) return <Shell><main><div data-testid="error-banner" role="alert" className="notice error">{error}<Link to="/">Back to scenarios</Link></div></main></Shell>;
-  if (!scenario || !graph) return <Shell><main className="loading"><div className="skeleton-block"/><p>Loading scenario model…</p></main></Shell>;
-  const selectedAsset = selection?.type === 'node' ? scenario.assets.find(asset => asset.id === selection.data.id) : undefined;
-  return <Shell><main className="workspace-page"><div className="model-banner"><span>Modelled environment</span> SYNTHETIC MODEL — NOT A LIVE NETWORK</div><div className="workspace-head"><div><Link to="/" className="back-link">← All scenarios</Link><h1>{scenario.name}</h1><p>{scenario.description}</p></div><div className="fingerprint">Scenario fingerprint<br/><code>{scenario.fingerprint.slice(0, 23)}…</code></div></div><div className="workspace"><section className="graph-panel"><div className="panel-heading"><div><span className="eyebrow">Attack surface</span><h2>Reachability map</h2></div><span className="graph-stat">{graph.edges.length} logical edges</span></div><div className="layers">{(['attack', 'permissions', 'flows', 'witness'] as const).map(layer => <label key={layer}><input data-testid={`layer-${layer}`} type="checkbox" checked={layers[layer]} onChange={event => setLayers({...layers, [layer]: event.target.checked})}/>{layer[0].toUpperCase() + layer.slice(1)} layer</label>)}</div>{state.after && <div className="graph-switch"><button type="button" className={state.view === 'before' ? 'active' : ''} onClick={() => state.setView('before')}>Before</button><button type="button" className={state.view === 'after' ? 'active' : ''} onClick={() => state.setView('after')}>After</button></div>}<GraphCanvas graph={graph} scenario={scenario} showAttack={layers.attack} showPermissions={layers.permissions} showFlows={layers.flows} showWitness={layers.witness} highlightedAction={highlighted} onSelection={selection => setSelection(selection)}/>{selection && <div className="selection-card"><strong>{selection.type === 'node' ? 'Asset' : 'Connection'}</strong><span>{String(selection.data.label || selection.data.id)}</span>{selectedAsset && <><small>{selectedAsset.id} · {selectedAsset.kind} · zone {selectedAsset.zone}</small><small>Services: {selectedAsset.services.map(service => `${service.id}:${service.port} (${service.finding_ids.join(', ') || 'no findings'})`).join(' · ') || 'none'}</small><small>Credentials: {selectedAsset.credentials.map(credential => `${credential.service_id} → ${credential.target_asset}`).join(' · ') || 'none'}</small></>}{selection.type === 'node' && <small>Origin: {selection.data.origin ? 'yes' : 'no'} · Target: {selection.data.target ? 'yes' : 'no'} · Reachable: {selection.data.reachable ? 'yes' : 'no'}</small>}{selection.type === 'edge' && <small>{Array.isArray(selection.data.reasons) ? (selection.data.reasons as {type: string; service_id: string; finding_id?: string; rule_ids?: string[]}[]).map(reason => `${reason.type} via ${reason.service_id}${reason.finding_id ? ` · ${reason.finding_id}` : ''} · grants ${reason.rule_ids?.join(', ') || 'none'}`).join(' | ') : `Rule ${String(selection.data.label)} · ${String(selection.data.status || 'active')}`}</small>}</div>}<details className="table-fallback"><summary>Accessible graph table</summary><table><thead><tr><th>Asset</th><th>Zone</th><th>Origin</th><th>Target</th><th>Reachable</th></tr></thead><tbody>{graph.nodes.map(node => <tr key={node.id}><td><button type="button" className="table-select" onClick={() => setSelection({type: 'node', data: {id: node.id, label: node.name, origin: node.is_origin, target: node.is_target, reachable: node.reachable}})}>{node.name}</button></td><td>{node.zone}</td><td>{node.is_origin ? 'yes' : 'no'}</td><td>{node.is_target ? 'yes' : 'no'}</td><td>{node.reachable ? 'yes' : 'no'}</td></tr>)}</tbody></table><table><thead><tr><th>Connection</th><th>Origin</th><th>Target</th><th>Reason</th></tr></thead><tbody>{graph.edges.map(edge => <tr key={edge.id}><td><button type="button" className="table-select" onClick={() => setSelection({type: 'edge', data: {id: edge.id, label: edge.id, reasons: edge.reasons}})}>{edge.id}</button></td><td>{edge.source}</td><td>{edge.target}</td><td>{edge.reasons.map(reason => `${reason.type}:${reason.service_id}`).join(', ')}</td></tr>)}</tbody></table></details></section><section className="panel work-panel"><nav className="tabs" aria-label="Workspace sections">{(['Inspect', 'Plan', 'Verify', 'Compare', 'Receipt'] as const).map(item => <button type="button" className={tab === item ? 'active' : ''} onClick={() => setTab(item)} key={item}>{item}</button>)}</nav>{error && <div role="alert" className="notice error">{error}</div>}{tabContent}</section></div></main></Shell>;
+  const kinds = useMemo(() => [...new Set(scenario?.assets.map(asset => asset.kind) ?? [])], [scenario]);
+
+  if (error && !scenario) return <Shell scenarioId={id}><main className="page"><Callout tone="risk" role="alert" testId="error-banner" title="This scenario could not be loaded">{error} <Link to="/">Back to scenarios</Link></Callout></main></Shell>;
+  if (!scenario || !graph || !before) return <Shell scenarioId={id}><main className="page loading" aria-busy="true"><div className="skeleton" style={{height: 48}}/><div className="skeleton" style={{height: 420}}/><p>Loading scenario model…</p></main></Shell>;
+
+  const nav: NavItem[] = STEPS.map(step => ({id: step.tab, label: step.tab, hint: step.hint, active: tab === step.tab, onSelect: () => { setTab(step.tab); if (step.tab === 'Compare' && state.after) state.setView('after'); }}));
+  const panel = tab === 'Inspect' ? <InspectPanel scenario={scenario} graph={before} highlight={setHighlighted}/>
+    : tab === 'Plan' ? <PlanPanel state={state} highlight={setHighlighted}/>
+    : tab === 'Verify' ? <VerifyPanel state={state}/>
+    : tab === 'Compare' ? <ComparePanel scenario={scenario} before={before} after={state.after} plan={state.plan}/>
+    : <ReceiptPanel receipt={state.receipt} onReverify={state.reverify} busy={state.busy} integrity={state.integrity}/>;
+
+  return <Shell nav={nav} scenarioId={id}><main className="page">
+    <header className="page-head"><div><div className="crumbs"><Link to="/">Scenarios</Link> / <span>{id}</span></div><h1>{scenario.name}</h1><p>{scenario.description}</p></div>
+      <div className="head-actions"><Chip tone="warn" title="All assets, findings and flows are invented for this demonstration">Synthetic model — not a live network</Chip>
+        <button type="button" className="btn btn-primary" onClick={state.compute} disabled={state.busy} aria-busy={state.busy}>{state.busy ? 'Working…' : 'Generate plan'}</button></div></header>
+    <div className="workspace">
+      <section className="stage" aria-label="Attack graph">
+        <div className="stage-bar"><div><span className="eyebrow">Question 2 · Where can an attacker move?</span><h2>{state.view === 'after' && state.after ? 'Network after the plan' : 'Attack surface today'}</h2></div>
+          {state.after && <div className="segmented" role="group" aria-label="Graph state"><button type="button" aria-pressed={state.view === 'before'} className={state.view === 'before' ? 'active' : ''} onClick={() => state.setView('before')}>Before</button>
+            <button type="button" aria-pressed={state.view === 'after'} className={state.view === 'after' ? 'active' : ''} onClick={() => state.setView('after')}>After</button></div>}</div>
+        <div className="layers" role="group" aria-label="Graph layers">{LAYERS.map(layer => <label key={layer.key} title={layer.help}><input data-testid={`layer-${layer.key}`} type="checkbox" checked={layers[layer.key]} onChange={event => setLayers({...layers, [layer.key]: event.target.checked})}/>{layer.label}</label>)}
+          <span className="graph-stat">{graph.edges.length} attack connections</span></div>
+        <Suspense fallback={<div className="skeleton" style={{height: 440}} aria-busy="true"/>}>
+          <GraphCanvas graph={graph} baseline={state.view === 'after' ? before : undefined} scenario={scenario} layers={layers} highlightedAction={highlighted} onSelection={setSelection}/></Suspense>
+        <Legend kinds={kinds} hasBlocked={state.view === 'after' && !!state.after}/>
+        {selection ? <Detail selection={selection} scenario={scenario}/> : <p className="hint">Select an asset or connection in the graph to see its details. Hover an asset to focus its neighbours.</p>}
+        <details className="table-fallback"><summary>Accessible graph table</summary><div className="tables"><table><thead><tr><th>Asset</th><th>Zone</th><th>Origin</th><th>Target</th><th>Reachable</th></tr></thead><tbody>{graph.nodes.map(node => <tr key={node.id}><td><button type="button" className="table-select" onClick={() => setSelection({type: 'node', data: {id: node.id, label: node.name, kind: node.kind, origin: node.is_origin, target: node.is_target, reachable: node.reachable}})}>{node.name}</button></td><td>{node.zone}</td><td>{node.is_origin ? 'yes' : 'no'}</td><td>{node.is_target ? 'yes' : 'no'}</td><td>{node.reachable ? 'yes' : 'no'}</td></tr>)}</tbody></table>
+          <table><thead><tr><th>Connection</th><th>From</th><th>To</th><th>Reason</th></tr></thead><tbody>{graph.edges.map(edge => <tr key={edge.id}><td><button type="button" className="table-select" onClick={() => setSelection({type: 'edge', data: {id: edge.id, edgeType: 'attack', source: edge.source, target: edge.target, reasons: edge.reasons}})}>{edge.id}</button></td><td>{edge.source}</td><td>{edge.target}</td><td>{edge.reasons.map(reason => `${reason.type}:${reason.service_id}`).join(', ')}</td></tr>)}</tbody></table></div></details>
+      </section>
+      <section className="inspector" aria-live="polite">{error && <Callout tone="risk" role="alert" title="Request failed">{error}</Callout>}{panel}</section>
+    </div></main></Shell>;
 }

@@ -32,8 +32,8 @@ The scenario owns all structure and action costs. The planner derives integer de
 - Canonical JSON, scenario fingerprints, receipt fingerprints, and tamper detection.
 - FastAPI health, scenario, graph, plan, and verify endpoints.
 - CLI validation, planning, and verification.
-- Interactive Cytoscape graph with compound zones, attack/rule/flow layers, node/edge selection, witness highlighting, fit/zoom/reset controls, and an accessible table fallback.
-- Responsive workflow for Inspect, Plan, Verify, Compare, and Receipt.
+- Interactive Cytoscape graph: zones laid out as columns by attack distance, asset shape by kind, attack/example-path/flow/firewall layers, hover focus, node/edge detail panel, legend, "blocked by plan" edges in the after view, fit/zoom/reset, and an accessible table fallback. Cytoscape is code-split and loaded only when a scenario opens.
+- Responsive five-step workflow (Inspect, Plan, Verify, Compare, Receipt) with plain-language explanations; design system documented in `DESIGN.md`.
 
 ## Repository structure
 
@@ -43,14 +43,16 @@ backend/src/chokepoint_verifier/ independent parser, fixpoint, checks, receipts
 backend/scenarios/             canonical and demo synthetic scenarios
 backend/tests/                 unit, API, oracle, adversarial, receipt tests
 frontend/src/                  React shell, Cytoscape graph, workflow views
-frontend/e2e/                  Playwright journey
+frontend/e2e/                  Playwright journey, error, switching and responsive specs
+.github/workflows/ci.yml       CI (unit tests, build, browser e2e)
+DESIGN.md                      design system and research record
 docs/                          architecture, algorithms, API, audit, testing
 ```
 
 ## Requirements
 
-- Python 3.11+ (the current worker has Python 3.11.2; Python 3.12 was unavailable).
-- Node 20+ and npm.
+- Python 3.11+ (developed and tested with 3.11.15).
+- Node 20+ and npm (tested with Node 26.4.0 / npm 11.17.0).
 - No database, Docker, credentials, paid service, or runtime network integration.
 
 ## Setup and run
@@ -77,7 +79,18 @@ cd frontend && npm run dev -- --host 127.0.0.1 --port 5173
 
 Port already in use? `lsof -nP -iTCP:8000 -iTCP:5173 -sTCP:LISTEN`, then `kill <PID>`.
 
-Browser end-to-end tests (`make e2e`) use ports 8010/5180 and need a one-time `cd frontend && npx playwright install chromium`.
+Browser end-to-end tests (`make e2e`) use their own ports 8010/5180 and need a one-time `cd frontend && npx playwright install chromium`.
+
+If that command prints `extracting archive` and then never finishes (observed with Playwright 1.49.1 on Node 26), the download itself is fine; the extractor is stuck. Stop it and unpack the cached zip yourself:
+
+```bash
+pkill -f "playwright install"
+Z=$(ls /var/folders/*/*/T/playwright-download-chromium-*.zip | head -1)
+D=~/Library/Caches/ms-playwright/chromium-1148   # build number from: ls ~/Library/Caches/ms-playwright
+rm -rf "$D"/chrome-mac && unzip -q "$Z" -d "$D" && touch "$D/INSTALLATION_COMPLETE"
+```
+
+Using Node 20 or 22 avoids the problem.
 
 Optional configuration is documented in `.env.example`; do not put secrets in scenario files or committed environment files.
 
@@ -109,12 +122,39 @@ make test               # backend and frontend suites
 cd frontend && npm run e2e  # Playwright; starts both servers via config
 ```
 
-The complete user journey is covered by the Playwright spec when the host has the required Chromium shared libraries: load scenario, inspect graph, compute, verify, compare, and view the receipt.
+## Demo script (about two minutes)
+
+1. `make dev`, open `http://127.0.0.1:5173`. The left rail shows **Backend online** from a live health check.
+2. Open **Demo City**. *Inspect* says how many critical targets an attacker can reach and shows one concrete path; the graph shows zones as columns from the attacker's side to the critical systems.
+3. Click **Generate plan**. The solver reports `OPTIMAL`, 5 actions, 105 dh; the graph switches to *After*, critical targets turn green, and removed attack steps appear as faint dashed "blocked" arrows. Expand an action to see what it changes.
+4. **Verify** runs the independent verifier: each check is listed in plain language. Tick or untick actions or enter a wrong claimed cost to see a `REJECTED` verdict with the failed checks.
+5. **Compare** shows targets reachable before/after, required flows kept (5/5) and attack connections removed.
+6. **Receipt** shows the SHA-256 digest, downloads the exact JSON, and can re-verify it. Switch scenario in the rail to try Canonical City (`A01-A04`, 200 dh).
+
+## Reading the results
+
+| Solver status | Meaning |
+|---|---|
+| `OPTIMAL` | Exact search finished inside the budget; no cheaper plan exists in this catalogue. |
+| `FEASIBLE_NOT_PROVEN` | A working plan was found (greedy, or exact search ran out of budget). It may not be the cheapest. |
+| `INFEASIBLE_*`, `NO_PLAN_FOUND_HEURISTIC` | No valid plan was produced; no receipt is issued. |
+
+`VERIFIED` means the independent verifier accepted the plan in the modelled network: targets cut off, required flows kept, costs correct, mandatory and exclusion rules respected. It does not mean the plan is cheapest. Costs are in **dh** (decihours: `effort + 2 x downtime`), a planning unit, not currency. The receipt digest is a SHA-256 integrity fingerprint, not a signature.
+
+## Tests
+
+```bash
+make test        # backend pytest (54 tests) + frontend Vitest (14 tests)
+make build       # TypeScript + production build
+make e2e         # Playwright, 10 tests: startup, both scenarios, switching, errors, receipt download, 3 viewport widths
+```
+
+CI (`.github/workflows/ci.yml`) runs the same commands. It has not yet been observed running on GitHub.
 
 ## Security boundaries and limitations
 
 This is an offline analysis tool over synthetic inputs. It uses allow-only, protocol-agnostic rules and does not model exploit prerequisites, privilege levels, probability, timing, live feeds, authentication, deployment, or real CVE intelligence. A SHA-256 fingerprint is an integrity digest, not a signature, authentication, tamper-proof storage, or proof. Real-world use requires authorised data, operational review, and separate deployment controls.
 
-The exact planner is exponential in the action catalogue. The demo is intentionally bounded to remain exhaustively testable. The production bundle currently reports a non-blocking chunk-size advisory because Cytoscape is included in the main bundle.
+The exact planner is exponential in the action catalogue. The demo is intentionally bounded to remain exhaustively testable.
 
 For evidence and remaining gaps, see `docs/ENGINEERING_AUDIT.md`, `docs/FINAL_REPORT.md`, and `docs/TESTING.md`.

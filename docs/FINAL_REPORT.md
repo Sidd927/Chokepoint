@@ -1,3 +1,5 @@
+> **Superseded in part (2026-10-24).** Written in an earlier cloud environment. Current test counts, the Playwright result, bundle size and push state are in [PROJECT_STATUS.md](PROJECT_STATUS.md); the UI was redesigned afterwards (see [DESIGN.md](../DESIGN.md)).
+
 # Final report
 
 Status: hardening pass completed locally. The hardening changes are intentionally uncommitted per the user's instruction to defer new commits. No GitHub push was performed.
