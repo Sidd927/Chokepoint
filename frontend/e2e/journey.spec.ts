@@ -150,6 +150,8 @@ test.describe('workspace', () => {
     expect(saved.action_ids).toEqual(['D01', 'D03', 'D08', 'D09', 'D10']);
     await page.getByTestId('receipt-reverify').click();
     await expect(page.getByTestId('receipt-integrity')).toContainText('Receipt fingerprint matches');
+    // long hashes must wrap inside the panel instead of widening it (regression: the panel used to clip its own content)
+    expect(await page.locator('.panel-inner').evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
   });
 
   test('Compare and Receipt explain themselves before a plan exists and lead to one', async ({page}) => {

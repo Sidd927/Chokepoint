@@ -158,3 +158,6 @@ pre { margin: 12px 0 0; max-height: 320px; overflow: auto; padding: 12px; backgr
 }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; animation: none !important; } }
 @media (max-width: 759px) { .topbar { position: static; } }
+/* Long hashes must wrap inside the panel instead of widening it. */
+.panel-inner, .panel-body { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+.callout > div, .callout-body, .digest code, .mono { min-width: 0; overflow-wrap: anywhere; }
