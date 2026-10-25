@@ -1,180 +1,197 @@
-# CHOKEPOINT
+<p align="center"><img src="docs/assets/README-hero.svg" alt="CHOKEPOINT: Cut the path. Keep the service." width="100%"></p>
 
-CHOKEPOINT is a defensive remediation-planning engine for a **synthetic, modelled** smart-city / critical-infrastructure network. It finds a lowest-cost set of catalogue actions that removes logical origin-to-target reachability while preserving required service flows, then independently verifies the result and emits a deterministic receipt.
+<p align="center">
+<img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white&labelColor=0b0d12">
+<img alt="FastAPI 0.115" src="https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white&labelColor=0b0d12">
+<img alt="React 18" src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white&labelColor=0b0d12">
+<img alt="TypeScript 5.7" src="https://img.shields.io/badge/TypeScript-5.7-3178C6?logo=typescript&logoColor=white&labelColor=0b0d12">
+<img alt="Vite 6" src="https://img.shields.io/badge/Vite-6-646CFF?logo=vite&logoColor=white&labelColor=0b0d12">
+<img alt="Cytoscape.js 3.31" src="https://img.shields.io/badge/Cytoscape.js-3.31-4c9aff?labelColor=0b0d12">
+<img alt="Tested with pytest, Vitest and Playwright" src="https://img.shields.io/badge/tests-pytest%20%7C%20Vitest%20%7C%20Playwright-47d391?labelColor=0b0d12">
+<a href=".github/workflows/ci.yml"><img alt="CI workflow" src="https://github.com/Sidd927/Chokepoint/actions/workflows/ci.yml/badge.svg"></a>
+</p>
 
-It does **not** scan, exploit, control, or change a real system. A graph edge is modelled reachability, not proof of exploitability. `VERIFIED` means the independent verifier accepted the modelled constraints; it is not a claim of real-world security, deployment, or optimality unless the solver status is `OPTIMAL`.
+**CHOKEPOINT is a graph-based security-planning prototype.** Given a model of a network, it finds a cost-effective set of remediation actions that cuts the *modelled* attack paths to critical systems while keeping the service flows the network needs, then has a separate verifier re-check the plan and produces evidence you can review: a PDF report and a JSON receipt with a SHA-256 fingerprint.
 
-This is a separate, new build. It does not copy source or assets from ChronoForge, and it does not assert compliance with any competition's originality rules.
+**The problem.** Connected systems contain routes an attacker could use to reach critical targets, but you cannot simply cut every connection: water pumps, traffic signals and backups depend on some of them. Every fix also costs effort and downtime. CHOKEPOINT treats this as an optimisation problem with two constraints: *block the modelled routes to critical targets* and *keep every required service flow permitted*, at the lowest modelled cost.
+
+**What is different.** The optimizer and the verifier are two separate programs. The verifier is standard-library-only, imports nothing from the planner (a test enforces it), and re-derives reachability, flows and costs from the raw scenario. Solver claims are honest: `OPTIMAL` appears only when the exact search finished. Every selected action comes with an explanation that separates computed facts from inference and from human-review suggestions.
+
+<p align="center"><img src="docs/assets/demo-preview.gif" alt="CHOKEPOINT generating a plan for demo_city and comparing the network before and after" width="860"></p>
+
+<p align="center"><em>A 15-second excerpt of the real application (plan, then before/after).<br><strong><a href="https://youtu.be/fO2kn9lb7pl">Watch the full 2:36 narrated demo on YouTube</a></strong></em></p>
+
+> **Scope.** CHOKEPOINT evaluates network *models you supply*. It does not scan networks, discover vulnerabilities, collect traffic, or change any firewall or control system. Built-in scenarios are synthetic. Results describe the model, not a live network.
+
+**Jump to:** [Demo video](https://youtu.be/fO2kn9lb7pl) · [Verified results](#verified-results) · [How it works](#how-it-works) · [Screenshots](#screenshots) · [Import a scenario](#import-your-own-scenario) · [Quick start](#quick-start) · [API](#api) · [Architecture](#architecture) · [Tests](#tests-and-validation) · [Limitations](#scope-security-and-limitations) · [Roadmap](#roadmap)
+
+---
+
+## Verified results
+
+Recomputed from the running application for the synthetic `demo_city` scenario (19 assets, 6 zones, 16 findings, 5 required flows, 18 catalogue actions):
+
+| | Before | After the plan |
+|---|---|---|
+| Critical targets reachable (modelled) | **3** | **0** |
+| Modelled attack connections | **76** | **27** (49 removed) |
+| Required service flows permitted | 5 of 5 | **5 of 5** |
+
+- **Selected actions:** D01, D03, D08, D09, D10 (five actions)
+- **Modelled cost:** **105 dh** (decihours; `effort + 2 × downtime`, a planning unit, not money)
+- **Solver status:** `OPTIMAL` (exact search finished after evaluating 28 candidate action sets)
+- **Verifier:** `VERIFIED`, 10 of 10 checks passed
+- **Receipt fingerprint:** `sha256:724410146d04f2aa5c3eeb88e0023dad37ce4858172436d085864d6637c09a37`
+
+The smaller `canonical_city` scenario plans to `OPTIMAL` with actions A01 to A04 at 200 dh. A reduction in modelled edges is a statement about the model; it is not a quantified real-world risk reduction. D01 is *mandatory* in the scenario and is not individually necessary for cutting the targets; D03, D08, D09 and D10 each are (see [explanations](#explanations-and-evidence)).
 
 ## How it works
 
-```mermaid
-flowchart LR
-  S[Scenario JSON] --> V[Strict validator]
-  V --> G[Graph semantics]
-  G --> P[Exact or greedy planner]
-  P --> I[Independent stdlib verifier]
-  I --> R[Deterministic receipt]
-  G --> U[React + Cytoscape UI]
-  P --> U
-  I --> U
-```
+`Model → Inspect → Plan → Verify → Compare → Report`
 
-The scenario owns all structure and action costs. The planner derives integer decihour costs as `effort_dh + 2*downtime_dh`. Exact search minimizes `(total cost, action count, sorted action IDs)` with deterministic node budgets. The verifier independently evaluates permissions, required flows, reachability, costs, exclusions, mandatory actions, and caps using a least-fixpoint formulation.
+| Stage | What happens | Where |
+|---|---|---|
+| **Model** | A scenario JSON lists zones, assets (with services and stored credentials), findings, firewall rules, required flows, attacker origins, critical targets and priced actions. | `backend/scenarios/*.json`, `scenario/validate.py` |
+| **Inspect** | An attack edge `A → B` exists if an attacker on A can exploit an unpatched finding on a service of B that a firewall rule lets A reach, or can reuse credentials A stores for B. The workspace shows what is reachable from the origins and one example route. | `graph/semantics.py` |
+| **Plan** | Branch-and-bound search over catalogue actions finds the lowest-cost set that leaves no target reachable and every required flow permitted. | `solver/exact.py` |
+| **Verify** | The independent verifier rebuilds the graph from the raw JSON and runs ten checks: scenario well-formed, IDs known and unique, no exclusions, mandatory actions present, cost recomputed, claimed cost matches, cost cap, required flows preserved, targets unreachable. | `chokepoint_verifier/` |
+| **Compare** | Before/after graphs from two real `/graph` calls; removed connections are drawn dashed. | `GraphCanvas.tsx` |
+| **Report** | PDF report and JSON receipt. | `report/pdf.py`, `receipt.py` |
 
-## Implemented features
+### Optimizer and solver statuses
 
-- Strict versioned scenario validation with JSON-pointer-style paths and static warnings.
-- Multi-reason attack graphs with exploit and credential causes.
-- Zone/asset rule matching, restricted and removed rules, required-flow preservation.
-- Exact branch-and-bound planning and greedy fallback with honest statuses.
-- Independent standard-library-only verifier; it never calls the optimizer.
-- Canonical JSON, scenario fingerprints, receipt fingerprints, and tamper detection.
-- FastAPI health, scenario, graph, plan, and verify endpoints.
-- CLI validation, planning, and verification.
-- Interactive Cytoscape graph: zones laid out as columns by attack distance, asset shape by kind, attack/example-path/flow/firewall layers, hover focus, node/edge detail panel, legend, "blocked by plan" edges in the after view, fit/zoom/reset, and an accessible table fallback. Cytoscape is code-split and loaded only when a scenario opens.
-- Landing page (`/`) with a scroll-driven story built from live API data (real required flows, attack routes, a flow-breaking quick fix, the optimal plan, the verifier result); no scroll hijacking, reduced-motion aware.
-- Graph-first workspace (`/scenarios/:id`): top bar with five-step navigator, one headline result per step, details behind disclosures, purposeful empty states. Design system in `DESIGN.md`.
+The planner searches sets of actions, starting from the mandatory ones. At each step it finds one shortest attack path to a target and branches only on actions that neutralise an edge on that path, discarding any set that breaks a required flow and any branch that cannot beat the best plan found. Costs are integers: `modelled cost = effort + 2 × downtime`, in decihours (`Action.cost_dh`). Ties break by cost, then action count, then action IDs, so results are deterministic.
+
+| Status | Meaning |
+|---|---|
+| `OPTIMAL` | The search finished within its budget. No cheaper plan exists in the catalogue under this model and objective. |
+| `FEASIBLE_NOT_PROVEN` | A plan satisfying all constraints was found but optimality is **not** established (greedy strategy, or the search budget ran out and a heuristic or the best plan so far is returned). |
+| `INFEASIBLE_*`, `NO_PLAN_FOUND_HEURISTIC` | No valid plan was produced. No plan, receipt or "verified" label is shown. |
+
+### Verifier and receipts
+
+`VERIFIED` means all checks passed *inside the model*. It does not prove the plan is the cheapest, that the scenario data is true, or that any real network is secure. A rejected plan is reported as rejected, with the failing checks.
+
+The receipt is canonical JSON containing the scenario fingerprint, selected actions and costs, solver status as claimed, and the verifier's check results. Its `receipt_fingerprint` is the SHA-256 of that canonical form. It detects changes to the record. **It is a hash, not a digital signature**, and does not show who produced it. Re-verify in the UI recomputes the receipt and compares fingerprints.
+
+### Explanations and evidence
+
+Each selected action is explained in three separate parts (`explain.py`):
+
+1. **Facts**, computed with the same graph engine the solver uses: what the action changes, how many modelled connections it removes when applied alone, and whether removing *only that action from this plan* would leave a target reachable ("necessary within this plan"). That is a local leave-one-out result, not a global necessity proof.
+2. **Inference**, labelled as not established by the solver (for example why a rule was narrowed rather than removed).
+3. **Confirm before real implementation**, human-review suggestions that are not model output.
+
+## Screenshots
+
+<table>
+<tr><td width="50%"><img src="docs/assets/landing.png" alt="Landing page with a live before/after graph"><br><sub><b>Landing page.</b> The hero graph and the scroll story are built from live API results.</sub></td>
+<td width="50%"><img src="docs/assets/workspace-before.png" alt="Workspace showing the baseline demo_city graph and one modelled route"><br><sub><b>Baseline.</b> 3 of 3 critical targets reachable; red = modelled attack paths, green dotted = required flows.</sub></td></tr>
+<tr><td><img src="docs/assets/workspace-after.png" alt="Compare view: targets 3 to 0, required flows 5 of 5"><br><sub><b>Before and after.</b> Dashed arrows are connections the plan removes.</sub></td>
+<td><img src="docs/assets/action-explanations.png" alt="Expanded action D03 with facts, necessity and review items"><br><sub><b>Action explanation</b> for D03: computed facts, necessity within the plan, items to confirm.</sub></td></tr>
+<tr><td><img src="docs/assets/verification-checks.png" alt="Verifier verdict VERIFIED with ten checks expanded"><br><sub><b>Independent verification.</b> Verdict first, then every check.</sub></td>
+<td><img src="docs/assets/verification-receipt.png" alt="Receipt screen with SHA-256 digest, download buttons and a matching re-verification"><br><sub><b>Receipt.</b> SHA-256 fingerprint, JSON and PDF downloads, re-verify.</sub></td></tr>
+</table>
+
+<p align="center"><img src="docs/assets/scenario-import.png" alt="Scenario import page: valid scenario with graph preview" width="720"><br><sub><b>Scenario import.</b> Validation result, warnings and a graph preview before anything is planned.</sub></p>
+<p align="center"><img src="docs/assets/pdf-report.png" alt="PDF report pages 1 and 2: summary metrics and before/after network drawings" width="720"><br><sub><b>PDF report</b> (pages 1 and 2 of the real output for demo_city).</sub></p>
 
 ## Import your own scenario
 
-Open **Import a scenario** (landing page nav, or `/import`). Upload a `.json` file or paste JSON in the documented format (use **Start from the Canonical City format** to get a template; `backend/scenarios/*.json` are further examples and `backend/src/chokepoint/scenario/validate.py` is the schema). **Validate and preview** sends it to `POST /api/v1/scenarios/validate`, which runs the same parser as the built-in scenarios and returns either path-level errors (`/actions/2/params/rule_id: unknown reference`) or a normalized scenario with a graph preview, warnings and counts. **Open in workspace** then runs Inspect → Plan → Verify → Compare → Receipt on it.
+Open **Import a scenario** (landing-page navigation, or `/import`). Choose a `.json` file or paste JSON, or click **Start from the Canonical City format** for a template. **Validate and preview** sends the document to `POST /api/v1/scenarios/validate`, which uses the same parser as the built-in scenarios and returns either path-level errors (`/actions/2/params/rule_id: unknown reference`) or the normalised scenario, warnings and a graph preview. **Open in workspace** then runs the full workflow on it.
 
-- **Format:** schema version `"1"`, exactly the fields the parser knows (unknown fields are rejected). Identifiers match `[A-Za-z][A-Za-z0-9_.-]{0,63}`.
-- **Limits for imports:** 256 KiB; 40 assets, 20 zones, 80 findings, 120 rules, 40 required flows, 40 actions, 10 origins, 10 targets, 8 services and 8 credentials per asset; search budget at most 1000 states (the default for imports). At these limits validation takes about 2 s and each search state about 50 ms.
-- **Lifecycle:** an imported scenario is held only in the browser tab (`sessionStorage`) and re-sent with each request. The server stores nothing, so nothing is shared with other users, written to disk or added to the built-in scenarios; closing the tab discards it. If validation fails, your text and any open workspace are unchanged.
-- **Not included:** a visual graph editor (edit the JSON and validate again).
+- **Format:** schema version `"1"`; the fields in [`backend/scenarios/canonical_city.json`](backend/scenarios/canonical_city.json) (a valid, complete example) and no others. Unknown fields are rejected. The schema is defined by `backend/src/chokepoint/scenario/validate.py`.
+- **Import limits:** 256 KiB; 40 assets, 20 zones, 80 findings, 120 rules, 40 required flows, 40 actions, 10 origins, 10 targets, 8 services and 8 credentials per asset; search budget at most 1000 states.
+- **Lifecycle:** the imported scenario is kept only in the browser tab (`sessionStorage`) and sent inline with each request. The server stores nothing and never adds it to the built-in scenarios.
+- **Not included:** live scanning, automatic extraction from real inventories, or a visual editor. You supply the model; the tool evaluates it.
 
-## Reports and receipts
+## Quick start
 
-On **Compare** and **Receipt**, **Download PDF report** builds a PDF on the server from the same data as the screen (`POST /api/v1/report`; the server recomputes the solver result, graphs, verification and explanations, so the client supplies no results): summary metrics and verdict, before/after network drawings with legend, every selected action with its explanation, the verifier's checks, solver proof metadata and fingerprints. **Download receipt (JSON)** is unchanged. A rejected or unverified selection is labelled as such in the PDF. Scenario text is treated as untrusted (escaped, control characters removed, limited to Latin-1 for the built-in PDF fonts, so other scripts appear as `?`), and nothing is sent to any external service. Very large graphs are drawn small; the figures in the tables remain authoritative.
+Requirements: **Python 3.11+**, **Node.js 20+** with npm (CI uses Node 22).
 
-## What the action explanations mean
+```bash
+git clone https://github.com/Sidd927/Chokepoint.git
+cd Chokepoint
+make setup      # backend/.venv (python3.13, 3.12 or 3.11) + pip install -e backend + npm ci
+make dev        # backend on :8000 and frontend on :5173; Ctrl-C stops both
+```
 
-Each selected action shows three separate things. **Facts** are computed with the same graph engine the solver uses: what it changes, how many modelled attack connections it removes when applied alone, and whether, within this plan, removing only that action would leave a critical target reachable ("necessary within this plan"). A mandatory or redundant action is never described as necessary. **Inference** is reasoning the code does not establish (shown as such). **Confirm before real implementation** lists human review suggestions, not model output. Solver status text follows the proof metadata: `OPTIMAL` only when the search finished; `FEASIBLE_NOT_PROVEN`, budget exhaustion and greedy fallback say plainly that a cheaper plan may exist.
+Open <http://127.0.0.1:5173>. If a port is busy: `lsof -nP -iTCP:8000 -iTCP:5173 -sTCP:LISTEN`.
 
-## Repository structure
+```bash
+make test       # backend pytest + frontend Vitest
+make build      # TypeScript + production Vite build
+make e2e        # Playwright (needs a one-time: cd frontend && npx playwright install chromium)
+```
+
+Command-line use (from the repository root):
+
+```bash
+PYTHONPATH=backend/src backend/.venv/bin/python -m chokepoint.cli plan backend/scenarios/demo_city.json
+PYTHONPATH=backend/src backend/.venv/bin/python -m chokepoint.cli verify backend/scenarios/demo_city.json --actions D01,D03,D08,D09,D10 --claimed-cost 105
+```
+
+Optional configuration is in [`.env.example`](.env.example); there are no secrets.
+
+## API
+
+Base path `/api/v1`. Checked-in contract: [`docs/openapi.json`](docs/openapi.json) (regenerate with `scripts/export_openapi.py`). Requests are strict (unknown fields rejected), bodies are capped at 256 KiB, errors use one envelope `{error: {code, message, details}}`.
+
+| Method and path | Purpose |
+|---|---|
+| `GET /health` | Service status and number of built-in scenarios |
+| `GET /scenarios`, `GET /scenarios/{id}` | Built-in scenario summaries and full definition |
+| `POST /scenarios/validate` | Validate a user-supplied scenario; returns errors or normalised scenario, warnings and graph |
+| `POST /graph` | Attack graph with a given set of actions applied |
+| `POST /plan` | Run the solver (`strategy`: `exact` or `greedy`, `max_nodes`); returns actions, cost, status, proof metadata, explanations, verification and receipt |
+| `POST /verify` | Independently verify any set of action IDs, optionally with a claimed cost |
+| `POST /report` | PDF report; the server recomputes everything from the scenario and either solver settings or action IDs |
+
+`/graph`, `/plan`, `/verify` and `/report` take either `scenario_id` (built-in) or an inline `scenario` (imported), never both.
+
+## Architecture
+
+<p align="center"><img src="docs/assets/architecture.svg" alt="Architecture: React frontend, FastAPI API, model engine, independent verifier" width="100%"></p>
+
+The diagram shows only modules that exist. There is no database, no authentication layer and no AI or LLM component: planning, verification, explanations and reports are deterministic code. See also [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/ALGORITHMS.md`](docs/ALGORITHMS.md) (written earlier in the project; where they differ from the code, the code is authoritative).
+
+**Backend** (`backend/`): Python 3.11+, FastAPI 0.115, Pydantic 2, Uvicorn, ReportLab 5 (PDF). **Frontend** (`frontend/`): React 18, TypeScript 5.7, Vite 6, React Router 7, Cytoscape.js 3.31. **Tests:** pytest, Vitest with Testing Library, Playwright.
 
 ```text
-backend/src/chokepoint/       core models, validation, graph, solver, API, CLI
-backend/src/chokepoint_verifier/ independent parser, fixpoint, checks, receipts
-backend/scenarios/             canonical and demo synthetic scenarios
-backend/tests/                 unit, API, oracle, adversarial, receipt tests
-frontend/src/                  React shell, Cytoscape graph, workflow views
-frontend/e2e/                  Playwright journey, error, switching and responsive specs
-.github/workflows/ci.yml       CI (unit tests, build, browser e2e)
-DESIGN.md                      design system and research record
-docs/                          architecture, algorithms, API, audit, testing
+backend/src/chokepoint/            API, scenario parsing, graph, solver, explanations, PDF
+  api/app.py  scenario/{validate,importer,loader}.py  graph/semantics.py
+  solver/exact.py  explain.py  report/pdf.py  cli.py
+backend/src/chokepoint_verifier/   independent verifier (standard library only) and receipts
+backend/scenarios/                 built-in synthetic scenarios (canonical_city, demo_city)
+backend/tests/                     pytest suites, brute-force oracle, receipt vectors
+frontend/src/                      pages (Landing, Workspace, Import), components, state, API client
+frontend/e2e/                      Playwright journeys
+docs/  DESIGN.md                   design notes, OpenAPI, project status
 ```
 
-## Requirements
+## Tests and validation
 
-- Python 3.11+ (developed and tested with 3.11.15).
-- Node 20+ and npm (tested with Node 26.4.0 / npm 11.17.0).
-- No database, Docker, credentials, paid service, or runtime network integration.
+| Suite | Command | Scope |
+|---|---|---|
+| Backend | `make backend-test` | scenario validation, graph semantics, solver against a brute-force oracle, verifier independence, receipts, API contract, import limits, explanations, PDF |
+| Frontend unit | `make frontend-test` | API client, state handling, import page, explanation rendering |
+| Browser end-to-end | `make e2e` | landing story, full workspace journey with real downloads, import flow, errors, three viewport widths |
 
-## Setup and run
+Last local run (macOS, Python 3.11, Node 26): 63 backend tests, 21 frontend tests and 19 Playwright tests passed, and the production build succeeded. The GitHub Actions workflow in `.github/workflows/ci.yml` runs the same `make` targets; its remote result is shown by the badge above and was not checked as part of this local validation. No coverage figure is claimed.
 
-Requirements: **Python >= 3.11** (macOS system `python3` is 3.9 and will not work; use `brew install python@3.11`) and **Node.js >= 20** with npm. Tested with Python 3.11.15, Node 26.4.0, npm 11.17.0 on macOS arm64.
+## Scope, security and limitations
 
-```bash
-make setup        # creates backend/.venv with python3.13/3.12/3.11, installs backend + `npm ci`
-make test         # backend pytest + frontend vitest
-make build        # frontend production build
-make dev          # starts backend :8000 and frontend :5173 together (Ctrl-C stops both)
-```
+- Results are only as good as the supplied model. Edges are modelled reachability, not proof of exploitability.
+- The optimizer works within the implemented model (allow-only, protocol-agnostic rules; no exploit prerequisites, privileges, probabilities or timing) and its search budget. `FEASIBLE_NOT_PROVEN` plans may not be cheapest. The exact search is exponential in the catalogue size.
+- The verifier shares the written model rules with the planner, so it catches implementation errors and plan violations, not mistakes in the model itself.
+- Implemented safeguards: strict request models, a body-size cap, import limits, a capped search budget for imports, uniform errors without stack traces, no server-side storage of imports, no external calls from report generation, untrusted scenario text escaped in PDFs (non-Latin text prints as `?`).
+- Not provided: authentication, per-user isolation, rate limiting, request timeouts (a worst-case import can occupy a worker for about a minute), audit logging. Production use would need those, operational validation and a security review. Treat imported data as sensitive: it travels to the server you run.
+- No LICENSE file is present in this repository; no licence is granted by this README.
 
-Override the interpreter with `make setup PYTHON=/path/to/python3.11`. If `backend/.venv` was created with an older Python, `make setup` is not enough on its own; recreate it with `python3.11 -m venv --clear backend/.venv`.
+## Roadmap
 
-Open `http://127.0.0.1:5173`. Backend health: `http://127.0.0.1:8000/api/v1/health`. The Vite dev server proxies `/api` to the backend (`VITE_PROXY_TARGET`, default `http://127.0.0.1:8000`).
+Future work, not implemented: a schema-guided scenario editor; mapping from authorised asset inventories into the scenario format; richer provenance for findings; deployment hardening (auth, quotas, timeouts, audit logs); published scalability benchmarks on larger scenarios; configurable report templates.
 
-Running the processes manually, in two terminals:
+## More documentation
 
-```bash
-PYTHONPATH=backend/src backend/.venv/bin/python -m uvicorn chokepoint.api.app:app --host 127.0.0.1 --port 8000
-cd frontend && npm run dev -- --host 127.0.0.1 --port 5173
-```
-
-Port already in use? `lsof -nP -iTCP:8000 -iTCP:5173 -sTCP:LISTEN`, then `kill <PID>`.
-
-Browser end-to-end tests (`make e2e`) use their own ports 8010/5180 and need a one-time `cd frontend && npx playwright install chromium`.
-
-If that command prints `extracting archive` and then never finishes (observed with Playwright 1.49.1 on Node 26), the download itself is fine; the extractor is stuck. Stop it and unpack the cached zip yourself:
-
-```bash
-pkill -f "playwright install"
-Z=$(ls /var/folders/*/*/T/playwright-download-chromium-*.zip | head -1)
-D=~/Library/Caches/ms-playwright/chromium-1148   # build number from: ls ~/Library/Caches/ms-playwright
-rm -rf "$D"/chrome-mac && unzip -q "$Z" -d "$D" && touch "$D/INSTALLATION_COMPLETE"
-```
-
-Using Node 20 or 22 avoids the problem.
-
-Optional configuration is documented in `.env.example`; do not put secrets in scenario files or committed environment files.
-
-## CLI
-
-```bash
-PYTHONPATH=backend/src backend/.venv/bin/python -m chokepoint.cli validate backend/scenarios/canonical_city.json
-PYTHONPATH=backend/src backend/.venv/bin/python -m chokepoint.cli plan backend/scenarios/canonical_city.json --json
-PYTHONPATH=backend/src backend/.venv/bin/python -m chokepoint.cli verify backend/scenarios/canonical_city.json --actions A01,A02,A03,A04 --claimed-cost 200
-```
-
-The canonical scenario currently produces `OPTIMAL` with actions `A01,A02,A03,A04`, total cost `200 dh`, and independent verification `VERIFIED`.
-
-## API and tests
-
-The API base is `/api/v1`. The checked-in contract is `docs/openapi.json`; regenerate it with:
-
-```bash
-PYTHONPATH=backend/src backend/.venv/bin/python scripts/export_openapi.py
-```
-
-Run the checks independently or together:
-
-```bash
-make backend-test       # pytest: core, oracle, verifier, API, CLI, adversarial
-make frontend-test      # Vitest + React Testing Library
-make build              # TypeScript + production Vite build
-make test               # backend and frontend suites
-cd frontend && npm run e2e  # Playwright; starts both servers via config
-```
-
-## Demo script (about two minutes)
-
-1. `make dev`, open `http://127.0.0.1:5173`. Scroll the landing story (or click **Explore the live demo**); the page shows **Backend online** from a live health check and every number on it comes from the API.
-2. In **Demo City**, *Inspect* says how many critical targets an attacker can reach and shows one concrete path; the graph shows zones as columns from the attacker's side to the critical systems.
-3. Click **Generate plan**. The solver reports `OPTIMAL`, 5 actions, 105 dh; the graph switches to *After*, critical targets turn green, and removed attack steps appear as faint dashed "blocked" arrows. Expand an action to see what it changes.
-4. **Verify** runs the independent verifier: each check is listed in plain language. Tick or untick actions or enter a wrong claimed cost to see a `REJECTED` verdict with the failed checks.
-5. **Compare** shows targets reachable before/after, required flows kept (5/5) and attack connections removed.
-6. **Receipt** shows the SHA-256 digest, downloads the exact JSON, and can re-verify it. Switch scenario in the top bar to try Canonical City (`A01-A04`, 200 dh).
-
-## Reading the results
-
-| Solver status | Meaning |
-|---|---|
-| `OPTIMAL` | Exact search finished inside the budget; no cheaper plan exists in this catalogue. |
-| `FEASIBLE_NOT_PROVEN` | A working plan was found (greedy, or exact search ran out of budget). It may not be the cheapest. |
-| `INFEASIBLE_*`, `NO_PLAN_FOUND_HEURISTIC` | No valid plan was produced; no receipt is issued. |
-
-`VERIFIED` means the independent verifier accepted the plan in the modelled network: targets cut off, required flows kept, costs correct, mandatory and exclusion rules respected. It does not mean the plan is cheapest. Costs are in **dh** (decihours: `effort + 2 x downtime`), a planning unit, not currency. The receipt digest is a SHA-256 integrity fingerprint, not a signature.
-
-## Tests
-
-```bash
-make test        # backend pytest (63 tests) + frontend Vitest (21 tests)
-make build       # TypeScript + production build
-make e2e         # Playwright, 19 tests (adds import flow and PDF download): landing story/anchors/reduced motion/no scroll hijack, workspace journey, receipt download, errors, 3 viewport widths
-```
-
-CI (`.github/workflows/ci.yml`) runs the same commands. It has not yet been observed running on GitHub.
-
-## Security boundaries and limitations
-
-Boundaries that exist in code: strict request models (unknown fields rejected), a 256 KiB body cap, the scenario parser plus import limits, a capped search budget for imports, errors returned as `{error: {code, message, details}}` without stack traces or server paths, no server-side storage of imports, no external calls from report generation. Not provided: authentication, per-user isolation beyond "nothing is stored", rate limiting, request timeouts (a worst-case import can occupy a worker for about a minute), audit logging, or any claim of production or enterprise readiness. Treat imported data as sensitive: it travels to the server you run.
-
-This is an offline analysis tool over synthetic inputs. It uses allow-only, protocol-agnostic rules and does not model exploit prerequisites, privilege levels, probability, timing, live feeds, authentication, deployment, or real CVE intelligence. A SHA-256 fingerprint is an integrity digest, not a signature, authentication, tamper-proof storage, or proof. Real-world use requires authorised data, operational review, and separate deployment controls.
-
-The exact planner is exponential in the action catalogue. The demo is intentionally bounded to remain exhaustively testable.
-
-For evidence and remaining gaps, see `docs/ENGINEERING_AUDIT.md`, `docs/FINAL_REPORT.md`, and `docs/TESTING.md`.
+[`DESIGN.md`](DESIGN.md) (visual system and research) · [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) · [`docs/TESTING.md`](docs/TESTING.md).
